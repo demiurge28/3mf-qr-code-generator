@@ -1,0 +1,35 @@
+{
+  "vBRIEFInfo": {
+    "version": "0.5",
+    "author": "agent:deft-directive-setup",
+    "description": "Typer CLI front-end wiring all layers together",
+    "created": "2026-04-17T15:15:00Z",
+    "updated": "2026-04-17T15:15:00Z"
+  },
+  "plan": {
+    "id": "typer-cli",
+    "title": "Typer CLI — flag parsing, validation, pipeline wiring",
+    "status": "proposed",
+    "tags": ["cli", "ux"],
+    "narratives": {
+      "Overview": "Single-command typer app that reads flags, validates them, calls qr → geometry → writer pipeline, and reports results.",
+      "Acceptance": "`qr2stl --help` prints the full option list. `qr2stl --text 'https://example.com' --out coaster` (no other flags) writes `coaster.3mf` using defaults. All flags in the spec invocation example work: `--text`, `--out`, `--size`, `--height` (base thickness), `--pixel-height`, `--ec` (L/M/Q/H), `--format` (stl|3mf), `--base-color`, `--pixel-color`. Invalid combinations produce non-zero exit + actionable stderr messages (e.g., `--base-color` with `--format stl` warns that color is ignored). Exit codes: 0 success, 1 usage error, 2 I/O error, 3 internal error. Integration tests invoke the CLI via `typer.testing.CliRunner` and assert on file existence + exit codes.",
+      "Scope": "src/qr2stl/cli.py — typer app, argument dataclass, pipeline orchestration, logging setup, exit-code mapping. Uses `Typer(no_args_is_help=True, add_completion=True)`.",
+      "Traces": "FR-1, FR-3, FR-4, FR-5"
+    },
+    "items": [],
+    "references": [
+      {
+        "type": "x-vbrief/context",
+        "uri": "./specification.vbrief.json",
+        "url": "./specification.vbrief.json",
+        "id": "qr2stl-specification",
+        "description": "Parent specification"
+      },
+      {
+        "type": "user-request",
+        "id": "spec-interview-2026-04-17"
+      }
+    ]
+  }
+}

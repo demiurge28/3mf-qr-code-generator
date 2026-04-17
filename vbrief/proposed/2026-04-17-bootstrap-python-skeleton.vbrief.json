@@ -1,0 +1,37 @@
+{
+  "vBRIEFInfo": {
+    "version": "0.5",
+    "author": "agent:deft-directive-setup",
+    "description": "Bootstrap Python package skeleton for qr2stl",
+    "created": "2026-04-17T15:15:00Z",
+    "updated": "2026-04-17T15:15:00Z"
+  },
+  "plan": {
+    "id": "bootstrap-python-skeleton",
+    "title": "Bootstrap Python skeleton (pyproject.toml, uv, Taskfile, CI)",
+    "status": "proposed",
+    "tags": ["bootstrap", "infra"],
+    "narratives": {
+      "Overview": "Stand up the project skeleton so all downstream scopes have a working test/build/lint loop.",
+      "Acceptance": "A newly cloned repo can run `uv sync` then `task check` and all stages (fmt, lint, typecheck, test) pass on an empty stub package. `uv tool install .` produces a `qr2stl` console script that prints `--help` output.",
+      "Scope": "Create pyproject.toml (Hatchling backend, Python ≥3.11), declare runtime deps (segno, numpy-stl, typer), declare dev deps (pytest, pytest-cov, ruff, mypy), add `[project.scripts] qr2stl = \"qr2stl.cli:app\"`, create src/qr2stl package with empty cli.py entrypoint (typer app exposing --help only), add Taskfile.yml with `check`, `fmt`, `lint`, `typecheck`, `test`, `test:coverage`, `build`, `clean` targets, add .gitignore, add placeholder .github/workflows/ci.yml running `task check` on ubuntu/macos/windows.",
+      "Traces": "FR-5, NFR-2, NFR-3",
+      "OutOfScope": "Actual CLI behavior (covered by typer-cli scope); geometry and writers (separate scopes)."
+    },
+    "items": [],
+    "references": [
+      {
+        "type": "x-vbrief/context",
+        "uri": "./specification.vbrief.json",
+        "url": "./specification.vbrief.json",
+        "id": "qr2stl-specification",
+        "description": "Parent specification"
+      },
+      {
+        "type": "user-request",
+        "id": "spec-interview-2026-04-17",
+        "description": "Greenfield spec interview — STL QR Code Generator"
+      }
+    ]
+  }
+}

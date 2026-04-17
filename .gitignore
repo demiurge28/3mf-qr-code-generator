@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# uv / virtualenv
+.venv/
+venv/
+env/
+.python-version
+
+# Deft framework (installed via `install-macos-universal`; upgrade with `cd deft && git fetch && git checkout <tag>`).
+# Not tracked in this repo; clone separately on new machines or convert to a git submodule.
+deft/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Generated / transient
+SPECIFICATION.md
+ROADMAP.md
+
+# Keep the vBRIEF folder tracked (source of truth) but ignore rendered views above.

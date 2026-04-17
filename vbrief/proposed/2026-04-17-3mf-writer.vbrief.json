@@ -1,0 +1,35 @@
+{
+  "vBRIEFInfo": {
+    "version": "0.5",
+    "author": "agent:deft-directive-setup",
+    "description": "Two-color 3MF writer with per-body color metadata",
+    "created": "2026-04-17T15:15:00Z",
+    "updated": "2026-04-17T15:15:00Z"
+  },
+  "plan": {
+    "id": "3mf-writer",
+    "title": "3MF writer — two-body container with per-body color metadata",
+    "status": "proposed",
+    "tags": ["writer", "3mf"],
+    "narratives": {
+      "Overview": "Emit a 3MF file with two distinct objects (base, pixels) tagged with their intended filament/color so dual-color slicers auto-assign extruders.",
+      "Acceptance": "`qr2stl.writers.threemf.write_3mf(base: Mesh, pixels: Mesh, path: Path, *, base_color: str = '#ffffff', pixel_color: str = '#000000') -> None` writes a valid 3MF file (zip container with 3D/3dmodel.model + [Content_Types].xml + _rels/.rels). Two `<object>` entries appear in the model XML with `pid`/`pindex` pointing into a `<basematerials>` table providing the two colors. Opens cleanly in PrusaSlicer and Bambu Studio with the two bodies pre-assigned to distinct filaments. Implementation prefers `lib3mf` Python bindings when available; falls back to hand-composed XML + `zipfile` if not installed (fallback clearly marked, unit-tested).",
+      "Scope": "src/qr2stl/writers/threemf.py — `write_3mf()` + small template/helpers. Tests exercise both the lib3mf and fallback paths (monkeypatch import). Determinism: xmlsort object order, stable UUIDs from a content hash (no wall clock). Zip entries written in a fixed order with deterministic timestamps (1980-01-01).",
+      "Traces": "FR-3, FR-4, NFR-1"
+    },
+    "items": [],
+    "references": [
+      {
+        "type": "x-vbrief/context",
+        "uri": "./specification.vbrief.json",
+        "url": "./specification.vbrief.json",
+        "id": "qr2stl-specification",
+        "description": "Parent specification"
+      },
+      {
+        "type": "user-request",
+        "id": "spec-interview-2026-04-17"
+      }
+    ]
+  }
+}

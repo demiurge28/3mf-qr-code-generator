@@ -1,0 +1,30 @@
+{
+  "vBRIEFInfo": {
+    "version": "0.5",
+    "author": "agent:deft-directive-setup",
+    "description": "Project specification for STL QR Code Generator (qr2stl) — Light path",
+    "created": "2026-04-17T15:15:00Z",
+    "updated": "2026-04-17T15:15:00Z"
+  },
+  "plan": {
+    "id": "qr2stl-specification",
+    "title": "STL QR Code Generator Specification",
+    "status": "draft",
+    "narratives": {
+      "Overview": "qr2stl is a Python CLI that converts an arbitrary string or URL into a 3D-printable mesh of a QR code. It supports single-color STL output and two-color 3MF output with per-body color metadata. Dimensions (base size, base thickness, pixel extrusion height), QR error-correction level, and output format are all configurable via flags, with sensible defaults so the minimum command is `qr2stl --text '<input>' --out <name>`.",
+      "Architecture": "Layered, pure-functional Python package. `io` layer wraps `segno` to produce a binary QR matrix from a string input. `geometry` layer converts a matrix plus a parameter struct into two explicit triangle meshes (flat base plate and extruded pixel blocks) using numpy-stl. `writers` layer emits the final artifacts: an STL writer merges the meshes into a single-color binary STL; a 3MF writer assembles a zipped 3MF container with two named bodies and per-body color metadata (via `lib3mf` Python bindings, falling back to direct XML composition if unavailable). `cli` layer is a `typer` front-end that parses flags, validates inputs, and invokes the pipeline. All layers are deterministic given identical inputs (no randomness, no wall-clock dependence) so tests can use golden fixtures.",
+      "Requirements": "FR-1 Accept a string or URL as primary input, with configurable QR error-correction level (L/M/Q/H, default M).\nFR-2 Produce a parametric 3D mesh with configurable base size (mm square), base thickness (mm), and pixel extrusion height (mm).\nFR-3 Emit outputs in two formats: single-color binary STL (merged mesh) and two-color 3MF (two bodies, body-scope color metadata) selectable via `--format`.\nFR-4 Use sensible defaults: size=60 mm, base=2 mm, pixel=1 mm, EC=M, format=3mf.\nFR-5 Provide a typer-based CLI (`qr2stl --text ... --out ... [flags]`) with clean `--help` and shell autocompletion support.\nNFR-1 Deterministic output: identical inputs produce byte-identical output files across runs and platforms.\nNFR-2 ≥85% test coverage overall and per-module, enforced in `task check`.\nNFR-3 Install story: `uv tool install .` or `pipx install .` MUST produce a working `qr2stl` console script on PATH.\nNFR-4 Runtime dependencies kept minimal: `segno`, `numpy-stl`, `typer`, and (optionally) `lib3mf`.",
+      "TestingStrategy": "Pytest-based. Unit tests cover each layer independently (io, geometry, writers, cli). Golden-fixture tests pin the binary output of representative inputs (e.g., a canonical URL at default params) to catch regressions in triangle ordering, face normals, or 3MF XML structure. Coverage gate at ≥85%, enforced via `task test:coverage` as part of `task check`.",
+      "Deployment": "Users install via `uv tool install .` or `pipx install .`. No server component; the tool is invoked on-demand from a terminal. Optional follow-up: publish to PyPI as `qr2stl` so `pipx install qr2stl` works without a local clone."
+    },
+    "items": [],
+    "references": [
+      {
+        "type": "x-vbrief/context",
+        "uri": "./PROJECT-DEFINITION.vbrief.json",
+        "url": "./PROJECT-DEFINITION.vbrief.json",
+        "description": "Project identity this specification implements"
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "vBRIEFInfo": {
+    "version": "0.5",
+    "author": "agent:deft-directive-setup",
+    "description": "QR matrix generation wrapping segno",
+    "created": "2026-04-17T15:15:00Z",
+    "updated": "2026-04-17T15:15:00Z"
+  },
+  "plan": {
+    "id": "qr-matrix-core",
+    "title": "QR matrix core — wrap segno and expose a binary matrix",
+    "status": "proposed",
+    "tags": ["qr", "core"],
+    "narratives": {
+      "Overview": "Produce a deterministic binary matrix (list[list[bool]] or numpy ndarray) from a text/URL input, with configurable error-correction level.",
+      "Acceptance": "`qr2stl.qr.build_matrix(text: str, ec: Literal['L','M','Q','H'] = 'M') -> QrMatrix` returns a `QrMatrix` value object exposing `.size: int`, `.modules: np.ndarray[bool]`, `.version: int`. Given identical text+ec, two calls return equal matrices. Invalid inputs (empty string, unknown ec) raise `ValueError` with a helpful message. Unit tests cover L/M/Q/H levels and boundary cases (very short text, near-capacity text).",
+      "Scope": "src/qr2stl/qr.py — `QrMatrix` dataclass, `build_matrix()` function that calls `segno.make(..., error=ec.lower())` and extracts the module matrix. Excludes quiet-zone padding (added by geometry layer). No file I/O.",
+      "Traces": "FR-1, NFR-1"
+    },
+    "items": [],
+    "references": [
+      {
+        "type": "x-vbrief/context",
+        "uri": "./specification.vbrief.json",
+        "url": "./specification.vbrief.json",
+        "id": "qr2stl-specification",
+        "description": "Parent specification"
+      },
+      {
+        "type": "user-request",
+        "id": "spec-interview-2026-04-17"
+      }
+    ]
+  }
+}
