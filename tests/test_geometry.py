@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from stl.mesh import Mesh
 
-from qr23mf.geometry import MIN_MODULE_MM, GeometryParams, build_meshes
+from qr23mf.geometry import (
+    MIN_MODULE_MM,
+    GeometryParams,
+    QrPlacement,
+    TextLabel,
+    build_meshes,
+)
 from qr23mf.qr import QrMatrix, build_matrix
 
 # --- GeometryParams validation -------------------------------------------------
@@ -209,3 +217,192 @@ def test_real_qr_produces_reasonable_triangle_counts() -> None:
     # Pixel count is 12 x number of dark modules.
     assert pixels.vectors.shape[0] % 12 == 0
     assert pixels.vectors.shape[0] > 0
+
+
+# --- Non-square plate (depth_mm) ----------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [0, -0.01])
+def test_non_positive_depth_raises(bad: float) -> None:
+    with pytest.raises(ValueError, match="depth_mm must be > 0"):
+        GeometryParams(depth_mm=bad)
+
+
+def test_effective_depth_defaults_to_size() -> None:
+    """``depth_mm=None`` means square plate (effective depth == size_mm)."""
+    p = GeometryParams(size_mm=80.0)
+    assert p.effective_depth_mm == 80.0
+    assert p.depth_mm is None
+
+
+def test_rectangular_plate_produces_correct_base_extent() -> None:
+    """A 100x50 mm plate must produce a base mesh with matching XY bounds."""
+    matrix = _all_light(21)
+    params = GeometryParams(size_mm=100.0, depth_mm=50.0, base_height_mm=2.0)
+    base, _ = build_meshes(matrix, params)
+    verts = base.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 0].min(), abs=1e-5) == -50.0
+    assert pytest.approx(verts[:, 0].max(), abs=1e-5) == +50.0
+    assert pytest.approx(verts[:, 1].min(), abs=1e-5) == -25.0
+    assert pytest.approx(verts[:, 1].max(), abs=1e-5) == +25.0
+
+
+def test_rectangular_plate_centers_qr_on_smaller_dimension() -> None:
+    """Without explicit placement, QR fills the smaller dimension (50 mm here)."""
+    matrix = _all_dark(5)
+    params = GeometryParams(size_mm=100.0, depth_mm=50.0, quiet_zone_modules=2)
+    _, pixels = build_meshes(matrix, params)
+    verts = pixels.vectors.reshape(-1, 3)
+    module_mm = 50.0 / (5 + 2 * 2)
+    usable_half = 50.0 / 2 - 2 * module_mm
+    assert pytest.approx(verts[:, 0].min(), abs=1e-4) == -usable_half
+    assert pytest.approx(verts[:, 0].max(), abs=1e-4) == +usable_half
+    assert pytest.approx(verts[:, 1].min(), abs=1e-4) == -usable_half
+    assert pytest.approx(verts[:, 1].max(), abs=1e-4) == +usable_half
+
+
+# --- QrPlacement validation and positioning -----------------------------------
+
+
+@pytest.mark.parametrize("bad", [0, -1.0])
+def test_qr_placement_non_positive_size_raises(bad: float) -> None:
+    with pytest.raises(ValueError, match="qr_size_mm must be > 0"):
+        QrPlacement(qr_size_mm=bad)
+
+
+def test_qr_placement_defaults() -> None:
+    p = QrPlacement()
+    assert p.qr_size_mm is None
+    assert p.x_offset_mm == 0.0
+    assert p.y_offset_mm == 0.0
+
+
+def test_qr_placement_shrinks_and_offsets_qr() -> None:
+    """A 30 mm QR offset by +20 mm X must sit entirely right of plate center."""
+    matrix = _all_dark(5)
+    params = GeometryParams(size_mm=100.0, quiet_zone_modules=0)
+    placement = QrPlacement(qr_size_mm=30.0, x_offset_mm=20.0)
+    _, pixels = build_meshes(matrix, params, placement=placement)
+    verts = pixels.vectors.reshape(-1, 3)
+    # QR spans x in [20 - 15, 20 + 15] = [5, 35].
+    assert pytest.approx(verts[:, 0].min(), abs=1e-4) == 5.0
+    assert pytest.approx(verts[:, 0].max(), abs=1e-4) == 35.0
+    assert pytest.approx(verts[:, 1].min(), abs=1e-4) == -15.0
+    assert pytest.approx(verts[:, 1].max(), abs=1e-4) == +15.0
+
+
+def test_qr_placement_outside_plate_raises() -> None:
+    matrix = _all_dark(5)
+    params = GeometryParams(size_mm=40.0, quiet_zone_modules=0)
+    placement = QrPlacement(qr_size_mm=30.0, x_offset_mm=15.0)  # reaches x=30 > 20
+    with pytest.raises(ValueError, match="extends outside"):
+        build_meshes(matrix, params, placement=placement)
+
+
+# --- Module style ------------------------------------------------------------
+
+
+def test_dot_style_triangle_count_matches_expected() -> None:
+    """Each dark module in 'dot' mode is a 16-gon prism = 4*16-4 = 60 triangles."""
+    matrix = _all_dark(5)
+    params = GeometryParams(size_mm=50.0, quiet_zone_modules=0)
+    _, pixels = build_meshes(matrix, params, module_style="dot")
+    n_dark = int(matrix.modules.sum())
+    assert pixels.vectors.shape == (n_dark * 60, 3, 3)
+
+
+def test_dot_style_prism_radius_matches_module() -> None:
+    matrix = _all_dark(3)
+    params = GeometryParams(size_mm=30.0, quiet_zone_modules=0)
+    _, pixels = build_meshes(matrix, params, module_style="dot")
+    verts = pixels.vectors.reshape(-1, 3)
+    # A regular 16-gon inscribed in a circle of radius 5 has its furthest
+    # vertex at r * cos(pi/16) ~= 4.904 from the center in any cardinal
+    # direction (because the polygon is rotated by pi/sides for aesthetics).
+    # With the right-most dot center at +10, max x is therefore ~14.904.
+    module_mm = 30.0 / 3
+    radius = module_mm / 2.0
+    expected_max = 10.0 + radius * math.cos(math.pi / 16)
+    assert pytest.approx(verts[:, 0].max(), rel=1e-3) == expected_max
+    assert pytest.approx(verts[:, 0].min(), rel=1e-3) == -expected_max
+    # And the 16-gon is fully contained within the square module footprint.
+    assert verts[:, 0].max() < 15.0 + 1e-4
+    assert verts[:, 0].min() > -15.0 - 1e-4
+
+
+def test_invalid_module_style_raises() -> None:
+    matrix = _all_light(21)
+    with pytest.raises(ValueError, match="module_style must be one of"):
+        build_meshes(matrix, GeometryParams(), module_style="triangle")  # type: ignore[arg-type]
+
+
+def test_default_style_is_square_and_backwards_compatible() -> None:
+    matrix = build_matrix("back-compat", ec="M")
+    params = GeometryParams()
+    _, before = build_meshes(matrix, params)
+    _, after = build_meshes(matrix, params, module_style="square")
+    assert np.array_equal(before.vectors, after.vectors)
+
+
+# --- TextLabel ----------------------------------------------------------------
+
+
+def test_text_label_rejects_empty_content() -> None:
+    with pytest.raises(ValueError, match="non-empty string"):
+        TextLabel(content="", x_mm=0, y_mm=0, height_mm=5, extrusion_mm=1)
+
+
+def test_text_label_rejects_non_positive_height() -> None:
+    with pytest.raises(ValueError, match="height_mm must be > 0"):
+        TextLabel(content="hi", x_mm=0, y_mm=0, height_mm=0, extrusion_mm=1)
+
+
+def test_text_label_rejects_non_positive_extrusion() -> None:
+    with pytest.raises(ValueError, match="extrusion_mm must be > 0"):
+        TextLabel(content="hi", x_mm=0, y_mm=0, height_mm=5, extrusion_mm=0)
+
+
+def test_text_labels_contribute_triangles_to_features_mesh() -> None:
+    """A text label with visible content must add triangles on top of the QR."""
+    matrix = _all_light(5)  # zero QR dark modules
+    params = GeometryParams(size_mm=80.0, quiet_zone_modules=0)
+    label = TextLabel(content="A", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.0)
+    _, features = build_meshes(matrix, params, text_labels=(label,))
+    # Each dark raster pixel becomes 12 triangles; at minimum we should get
+    # several dozen triangles for a single character.
+    assert features.vectors.shape[0] > 0
+    assert features.vectors.shape[0] % 12 == 0
+
+
+def test_text_labels_above_plate_top() -> None:
+    """Text extrusion must sit strictly above the plate top face."""
+    matrix = _all_light(5)
+    params = GeometryParams(size_mm=80.0, base_height_mm=2.0, quiet_zone_modules=0)
+    label = TextLabel(content="Z", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.5)
+    _, features = build_meshes(matrix, params, text_labels=(label,))
+    verts = features.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == params.base_height_mm
+    assert pytest.approx(verts[:, 2].max(), abs=1e-4) == (
+        params.base_height_mm + label.extrusion_mm
+    )
+
+
+def test_text_label_outside_plate_raises() -> None:
+    matrix = _all_light(5)
+    params = GeometryParams(size_mm=20.0, quiet_zone_modules=0)
+    # 'MMM' is wide enough to exceed a 20 mm plate when height_mm=15.
+    label = TextLabel(content="MMM", x_mm=0.0, y_mm=0.0, height_mm=15.0, extrusion_mm=1.0)
+    with pytest.raises(ValueError, match="extends outside"):
+        build_meshes(matrix, params, text_labels=(label,))
+
+
+def test_build_meshes_default_extras_produce_byte_identical_output() -> None:
+    """Passing placement=None, module_style='square', text_labels=() is a no-op."""
+    matrix = build_matrix("extras-are-noop", ec="M")
+    params = GeometryParams()
+    a_base, a_feats = build_meshes(matrix, params)
+    b_base, b_feats = build_meshes(
+        matrix, params, placement=None, module_style="square", text_labels=()
+    )
+    assert np.array_equal(a_base.vectors, b_base.vectors)
+    assert np.array_equal(a_feats.vectors, b_feats.vectors)

@@ -101,6 +101,36 @@ aligned boxes with outward-facing normals, so slicers see watertight solids.
 * Batch mode, preset profiles, embossed vs debossed, logo overlay — later
   scopes tracked in `vbrief/proposed/`.
 
+## GUI (Tkinter)
+
+`qr23mf gui` opens a Tkinter configurator with:
+
+* Base plate width / depth / thickness (rectangular plates supported)
+* QR code size and X / Y offset on the plate (0 mm size = auto-fit)
+* Module extrusion, quiet-zone margin, module style (**Squares** or **Dots**)
+* Text labels — add, update, or remove any number of labels with their own
+  position, height, and extrusion
+* **Preview** button that opens a top-down 2D preview window
+* **Create…** button in the preview window that writes a binary STL via
+  a native save dialog
+
+```bash
+qr23mf gui
+```
+
+### macOS / Homebrew note
+
+Homebrew's Python 3.11 ships without Tk bindings by default. If
+`qr23mf gui` reports `Tkinter is not available`, install the matching
+Tk package:
+
+```bash
+brew install python-tk@3.11
+```
+
+Then re-run `uv sync --all-extras` (or reinstall with `uv tool install .`)
+so the virtual environment picks up the refreshed interpreter.
+
 ## Development workflow
 
 ```bash

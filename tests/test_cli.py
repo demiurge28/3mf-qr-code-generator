@@ -1,15 +1,19 @@
 """Tests for the qr23mf CLI.
 
-Covers the top-level ``--help`` / ``--version`` surface and the ``generate``
-subcommand that wires the pipeline (text -> QrMatrix -> meshes -> optional
-STL file) end-to-end.
+Covers the top-level ``--help`` / ``--version`` surface, the ``generate``
+subcommand that wires the pipeline end-to-end, and the ``gui`` subcommand's
+graceful failure paths when optional GUI dependencies are missing.
 """
 
 from __future__ import annotations
 
+import builtins
 import re
+import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import pytest
 from stl.mesh import Mesh
 from typer.testing import CliRunner
 
@@ -132,3 +136,79 @@ def test_generate_appends_stl_suffix_when_missing(tmp_path: Path) -> None:
     result = runner.invoke(app, ["generate", "--text", "hi", "--out", str(out)])
     assert result.exit_code == 0, result.output
     assert (tmp_path / "coaster.stl").exists()
+
+
+# --- gui subcommand -----------------------------------------------------------
+
+
+def test_gui_command_appears_in_top_level_help() -> None:
+    result = runner.invoke(app, ["--help"], env=_WIDE_PLAIN_ENV)
+    assert result.exit_code == 0
+    assert "gui" in _plain(result.stdout)
+
+
+def test_gui_help_mentions_tkinter_and_brew_hint() -> None:
+    result = runner.invoke(app, ["gui", "--help"], env=_WIDE_PLAIN_ENV)
+    assert result.exit_code == 0
+    plain = _plain(result.stdout)
+    assert "Tkinter" in plain or "tkinter" in plain
+    assert "python-tk" in plain
+
+
+def _patch_gui_import_to_fail(monkeypatch: pytest.MonkeyPatch, missing_name: str) -> None:
+    """Make ``from qr23mf.gui import run`` raise ``ModuleNotFoundError(missing_name)``.
+
+    Works regardless of whether qr23mf.gui is already cached in sys.modules
+    (we drop the cache first so the CLI's lazy import re-resolves).
+    """
+    monkeypatch.delitem(sys.modules, "qr23mf.gui", raising=False)
+    original_import = builtins.__import__
+
+    def fake_import(
+        name: str,
+        globals_: Mapping[str, object] | None = None,
+        locals_: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] | None = (),
+        level: int = 0,
+    ) -> object:
+        if name == "qr23mf.gui":
+            raise ModuleNotFoundError(f"No module named {missing_name!r}", name=missing_name)
+        return original_import(name, globals_, locals_, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+
+def test_gui_reports_missing_tkinter_with_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_gui_import_to_fail(monkeypatch, "_tkinter")
+    result = runner.invoke(app, ["gui"])
+    assert result.exit_code == 2
+    assert "Tkinter is not available" in result.output
+    assert "python-tk" in result.output
+
+
+def test_gui_reports_missing_tkinter_top_level_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Some Python builds surface the missing module as ``tkinter`` itself."""
+    _patch_gui_import_to_fail(monkeypatch, "tkinter")
+    result = runner.invoke(app, ["gui"])
+    assert result.exit_code == 2
+    assert "Tkinter is not available" in result.output
+
+
+def test_gui_reports_missing_pillow_with_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_gui_import_to_fail(monkeypatch, "PIL.ImageFont")
+    result = runner.invoke(app, ["gui"])
+    assert result.exit_code == 2
+    assert "Pillow" in result.output
+
+
+def test_gui_reports_generic_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_gui_import_to_fail(monkeypatch, "some_unrelated_module")
+    result = runner.invoke(app, ["gui"])
+    assert result.exit_code == 2
+    assert "failed to import qr23mf.gui" in result.output
