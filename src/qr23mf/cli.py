@@ -171,5 +171,45 @@ def generate(
         typer.echo(f"Wrote {out_path}")
 
 
+@app.command()
+def gui() -> None:
+    """Launch the Tkinter GUI (plate / QR / text labels + preview + create).
+
+    The GUI lets you pick the base-plate dimensions, QR code size and
+    position on the plate, add text labels, choose between square and dot
+    modules, and preview the layout before writing a binary STL.
+
+    Requires Python's Tk bindings. On macOS with Homebrew Python 3.11
+    you may need to install them separately:
+
+        brew install python-tk@3.11
+    """
+    try:
+        from qr23mf.gui import run as run_gui
+    except ModuleNotFoundError as exc:
+        missing = exc.name or ""
+        if missing in {"tkinter", "_tkinter"}:
+            typer.secho(
+                "Error: Tkinter is not available in this Python install. "
+                "On macOS with Homebrew, run: brew install python-tk@3.11",
+                err=True,
+                fg=typer.colors.RED,
+            )
+        elif missing.split(".", 1)[0] in {"PIL", "Pillow"}:
+            typer.secho(
+                "Error: Pillow is required for the GUI (text rasterization). "
+                "Install it with: uv sync --all-extras  (or: pip install pillow)",
+                err=True,
+                fg=typer.colors.RED,
+            )
+        else:
+            typer.secho(
+                f"Error: failed to import qr23mf.gui ({exc}).", err=True, fg=typer.colors.RED
+            )
+        raise typer.Exit(code=2) from exc
+
+    run_gui()
+
+
 if __name__ == "__main__":  # pragma: no cover - manual invocation only
     app()

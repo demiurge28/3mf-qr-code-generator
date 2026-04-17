@@ -29,6 +29,7 @@ dependencies = [
   "segno>=1.6,<2",
   "numpy-stl>=3.1,<4",
   "typer>=0.12,<1",
+  "pillow>=10,<12",
 ]
 
 [project.optional-dependencies]
@@ -90,6 +91,10 @@ pythonpath = ["src"]
 [tool.coverage.run]
 branch = true
 source = ["qr23mf"]
+# The Tkinter GUI is integration code that requires a live Tk runtime; CI and
+# many local Python builds (e.g. Homebrew Python 3.11 without python-tk)
+# cannot even import it. The CLI's lazy-import path is covered in test_cli.py.
+omit = ["src/qr23mf/gui.py"]
 
 [tool.coverage.report]
 fail_under = 85
