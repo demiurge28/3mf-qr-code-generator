@@ -1,6 +1,6 @@
 version: '3'
 
-# Project-level Taskfile for qr2stl.
+# Project-level Taskfile for qr23mf.
 #
 # Install Task: https://taskfile.dev/installation/
 # All tasks assume `uv` (https://docs.astral.sh/uv/) is available and
@@ -45,7 +45,7 @@ tasks:
   test:coverage:
     desc: Run pytest with branch coverage and the 85% gate
     cmds:
-      - uv run pytest --cov=qr2stl --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=85
+      - uv run pytest --cov=qr23mf --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=85
 
   check:
     desc: "Pre-commit gate: format check + lint + typecheck + tests w/ coverage"

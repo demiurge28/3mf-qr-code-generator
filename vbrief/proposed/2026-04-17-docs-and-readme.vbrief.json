@@ -13,7 +13,7 @@
     "tags": ["docs"],
     "narratives": {
       "Overview": "Ship user-facing docs so the tool is discoverable and learnable without reading source.",
-      "Acceptance": "README.md at project root covers: what qr2stl is, install (uv tool / pipx / from source), quickstart (single command), full flag reference (mirrors --help), two-color printing tips, a short FAQ, and a sample gallery (3-5 rendered previews at the top). docs/ directory includes PRINTING.md with tips for slicer setup (dual extruder assignment, bed adhesion, recommended layer height). Every flag in the CLI scope is documented exactly once in the README; a test parses --help output and asserts 1:1 coverage.",
+      "Acceptance": "README.md at project root covers: what qr23mf is, install (uv tool / pipx / from source), quickstart (single command), full flag reference (mirrors --help), two-color printing tips, a short FAQ, and a sample gallery (3-5 rendered previews at the top). docs/ directory includes PRINTING.md with tips for slicer setup (dual extruder assignment, bed adhesion, recommended layer height). Every flag in the CLI scope is documented exactly once in the README; a test parses --help output and asserts 1:1 coverage.",
       "Scope": "README.md, docs/PRINTING.md, docs/gallery/*.png (renders produced by the tool itself). Keep copy tight (≤400 lines total README).",
       "Traces": "FR-5 (UX-adjacent)"
     },
@@ -23,7 +23,7 @@
         "type": "x-vbrief/context",
         "uri": "./specification.vbrief.json",
         "url": "./specification.vbrief.json",
-        "id": "qr2stl-specification",
+        "id": "qr23mf-specification",
         "description": "Parent specification"
       },
       {

@@ -1,4 +1,4 @@
-"""Tests for :mod:`qr2stl.qr` (qr-matrix-core scope, traces FR-1, NFR-1)."""
+"""Tests for :mod:`qr23mf.qr` (qr-matrix-core scope, traces FR-1, NFR-1)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import get_args
 import numpy as np
 import pytest
 
-from qr2stl.qr import EcLevel, QrMatrix, build_matrix
+from qr23mf.qr import EcLevel, QrMatrix, build_matrix
 
 _EC_LEVELS: tuple[EcLevel, ...] = get_args(EcLevel)
 
@@ -17,7 +17,7 @@ def test_build_matrix_all_ec_levels_produce_valid_square_bool_matrix(
     ec: EcLevel,
 ) -> None:
     """Each EC level must yield a square boolean matrix at a valid QR version."""
-    result = build_matrix("https://example.com/qr2stl", ec=ec)
+    result = build_matrix("https://example.com/qr23mf", ec=ec)
     assert isinstance(result, QrMatrix)
     assert result.ec == ec
     assert result.modules.dtype == np.bool_

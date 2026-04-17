@@ -1,6 +1,6 @@
-# qr2stl
+# 3mf QR Code Generator
 
-Turn a string or URL into a 3D-printable QR code mesh: single-color **STL** or two-color **3MF** with per-body color metadata. Built as a small, pure-Python CLI.
+`qr23mf` — turn a string or URL into a 3D-printable QR code mesh: two-color **3MF** with per-body color metadata, or single-color **STL**. Built as a small, pure-Python CLI.
 
 > **Status:** bootstrap skeleton only. Functionality lands scope-by-scope — see `vbrief/proposed/` and `vbrief/active/` for the work-in-progress plan.
 
@@ -10,7 +10,7 @@ Requires [uv](https://docs.astral.sh/uv/) and optionally [Task](https://taskfile
 
 ```bash
 uv sync --all-extras
-uv run qr2stl --help
+uv run qr23mf --help
 ```
 
 ## Install (end users)
@@ -21,7 +21,7 @@ uv tool install .
 pipx install .
 ```
 
-Either command exposes a `qr2stl` binary on `PATH`.
+Either command exposes a `qr23mf` binary on `PATH`.
 
 ## Development workflow
 

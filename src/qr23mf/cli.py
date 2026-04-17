@@ -1,4 +1,4 @@
-"""Typer CLI skeleton for qr2stl.
+"""Typer CLI skeleton for qr23mf.
 
 Bootstrap scope (see ``vbrief/active/2026-04-17-bootstrap-python-skeleton.vbrief.json``)
 only wires up ``--help`` and ``--version``. The real ``generate`` command lands in
@@ -11,14 +11,14 @@ from typing import Annotated
 
 import typer
 
-from qr2stl import __version__
+from qr23mf import __version__
 
 app = typer.Typer(
-    name="qr2stl",
+    name="qr23mf",
     help=(
         "Turn a string or URL into a 3D-printable QR code mesh (single-color STL "
         "or two-color 3MF). This command surface is currently a skeleton; run "
-        "`qr2stl --help` to see available options."
+        "`qr23mf --help` to see available options."
     ),
     no_args_is_help=True,
     add_completion=True,
@@ -26,9 +26,9 @@ app = typer.Typer(
 
 
 def _version_callback(value: bool) -> None:
-    """Print the installed qr2stl version and exit."""
+    """Print the installed qr23mf version and exit."""
     if value:
-        typer.echo(f"qr2stl {__version__}")
+        typer.echo(f"qr23mf {__version__}")
         raise typer.Exit()
 
 
@@ -38,13 +38,13 @@ def main(
         bool,
         typer.Option(
             "--version",
-            help="Show the qr2stl version and exit.",
+            help="Show the qr23mf version and exit.",
             is_eager=True,
             callback=_version_callback,
         ),
     ] = False,
 ) -> None:
-    """qr2stl root command.
+    """qr23mf root command.
 
     Subcommands land here as later scopes ship. At the moment the command is a
     placeholder and exits via ``no_args_is_help`` when invoked without options.
