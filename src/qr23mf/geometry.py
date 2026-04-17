@@ -33,6 +33,7 @@ __all__ = [
     "MIN_MODULE_MM",
     "GeometryParams",
     "ModuleStyle",
+    "QrFinish",
     "QrPlacement",
     "TextLabel",
     "build_meshes",
@@ -49,6 +50,21 @@ MIN_MODULE_MM: Final[float] = 0.05
 ModuleStyle = Literal["square", "dot"]
 
 _VALID_STYLES: Final[frozenset[str]] = frozenset(("square", "dot"))
+
+#: Surface finish of the QR code relative to the plate top face.
+#:
+#: * ``"extruded"`` (default) — QR pixels rise above the plate (tactile).
+#: * ``"flush"``              — QR pixels occupy the plate's top ``pixel_height_mm``
+#:                              slab. Base is unchanged and overlaps the pixel mesh
+#:                              in that slab; multi-material slicers resolve the
+#:                              overlap via per-mesh filament assignment.
+#: * ``"sunken"``             — QR pixels occupy the plate's top ``pixel_height_mm``
+#:                              slab **and** the base has matching pockets
+#:                              carved out of its top face, so the QR is
+#:                              visibly recessed even in single-color prints.
+QrFinish = Literal["extruded", "flush", "sunken"]
+
+_VALID_FINISHES: Final[frozenset[str]] = frozenset(("extruded", "flush", "sunken"))
 
 #: Regular-polygon sides used to approximate a dot. 16-gon gives a visibly
 #: round print at a modest triangle count (4 * 16 - 4 = 60 triangles/dot).
@@ -321,6 +337,75 @@ def _rasterize_text_to_grid(content: str, height_mm: float) -> tuple[_BoolArray,
 
 
 # ---------------------------------------------------------------------------
+# Sunken base (plate with QR-pixel pockets)
+# ---------------------------------------------------------------------------
+
+
+def _build_sunken_base(
+    matrix: QrMatrix,
+    quiet_zone_modules: int,
+    module_mm: float,
+    half_w: float,
+    half_d: float,
+    qr_left: float,
+    qr_right: float,
+    qr_top_y: float,
+    qr_bottom_y: float,
+    z_mid: float,
+    z_top: float,
+) -> _FloatArray:
+    """Build a plate mesh with rectangular pockets carved into its top face.
+
+    Decomposes the top layer ``z = [z_mid, z_top]`` of the plate into the
+    union of axis-aligned boxes that cover everything *except* the dark QR
+    module cells. The bottom slab ``z = [0, z_mid]`` is emitted as a single
+    full-plate box. The returned triangles form a watertight solid suitable
+    for numpy-stl.
+    """
+    chunks: list[_FloatArray] = []
+
+    # Bottom slab (always present when pockets are shallower than the plate).
+    if z_mid > 0.0:
+        chunks.append(_extrude_axis_aligned_box(-half_w, -half_d, 0.0, half_w, half_d, z_mid))
+
+    # Margin strips in the top layer around the QR footprint (left / right /
+    # top / bottom). Only emit strips with strictly positive width/depth.
+    tol = 1e-6
+    if qr_left > -half_w + tol:
+        chunks.append(_extrude_axis_aligned_box(-half_w, -half_d, z_mid, qr_left, half_d, z_top))
+    if qr_right < half_w - tol:
+        chunks.append(_extrude_axis_aligned_box(qr_right, -half_d, z_mid, half_w, half_d, z_top))
+    if qr_top_y < half_d - tol:
+        chunks.append(_extrude_axis_aligned_box(qr_left, qr_top_y, z_mid, qr_right, half_d, z_top))
+    if qr_bottom_y > -half_d + tol:
+        chunks.append(
+            _extrude_axis_aligned_box(qr_left, -half_d, z_mid, qr_right, qr_bottom_y, z_top)
+        )
+
+    # QR grid cells (matrix area + quiet zone). Emit a box for every cell
+    # that is NOT a dark module. Quiet-zone cells are always light.
+    total_modules = matrix.size + 2 * quiet_zone_modules
+    for grid_row in range(total_modules):
+        for grid_col in range(total_modules):
+            in_matrix = (
+                quiet_zone_modules <= grid_row < quiet_zone_modules + matrix.size
+                and quiet_zone_modules <= grid_col < quiet_zone_modules + matrix.size
+            )
+            if in_matrix:
+                inner_row = grid_row - quiet_zone_modules
+                inner_col = grid_col - quiet_zone_modules
+                if bool(matrix.modules[inner_row, inner_col]):
+                    continue  # dark module — leave pocket
+            x0 = qr_left + grid_col * module_mm
+            x1 = x0 + module_mm
+            y1 = qr_top_y - grid_row * module_mm
+            y0 = y1 - module_mm
+            chunks.append(_extrude_axis_aligned_box(x0, y0, z_mid, x1, y1, z_top))
+
+    return np.concatenate(chunks, axis=0)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -331,6 +416,7 @@ def build_meshes(
     *,
     placement: QrPlacement | None = None,
     module_style: ModuleStyle = "square",
+    qr_finish: QrFinish = "extruded",
     text_labels: Sequence[TextLabel] = (),
 ) -> tuple[Mesh, Mesh]:
     """Build the base plate and feature meshes for a QR code.
@@ -347,6 +433,10 @@ def build_meshes(
             plate, preserving the original single-argument behavior.
         module_style: ``"square"`` (axis-aligned box per dark module, default)
             or ``"dot"`` (cylindrical prism per dark module).
+        qr_finish: ``"extruded"`` (default, raised above plate),
+            ``"flush"`` (pixels occupy the plate's top slab; base unchanged),
+            or ``"sunken"`` (pixels occupy the plate's top slab **and** the
+            base has matching pockets carved into its top face).
         text_labels: Optional iterable of :class:`TextLabel` to extrude on the
             plate top. Each label is rasterized with Pillow; dark pixels are
             extruded as tiny axis-aligned boxes.
@@ -359,12 +449,22 @@ def build_meshes(
 
     Raises:
         ValueError: If the per-module edge would fall below
-            :data:`MIN_MODULE_MM`, if ``module_style`` is unknown, or if the
-            QR or any text label would extend outside the plate.
+            :data:`MIN_MODULE_MM`, if ``module_style`` / ``qr_finish`` is
+            unknown, if a non-extruded finish would require pixels deeper
+            than the base plate, or if the QR / any text label would extend
+            outside the plate.
     """
     if module_style not in _VALID_STYLES:
         raise ValueError(
             f"module_style must be one of {sorted(_VALID_STYLES)}, got {module_style!r}"
+        )
+    if qr_finish not in _VALID_FINISHES:
+        raise ValueError(f"qr_finish must be one of {sorted(_VALID_FINISHES)}, got {qr_finish!r}")
+    if qr_finish != "extruded" and params.pixel_height_mm >= params.base_height_mm:
+        raise ValueError(
+            f"pixel_height_mm ({params.pixel_height_mm}) must be < "
+            f"base_height_mm ({params.base_height_mm}) for {qr_finish!r} finish "
+            f"(pixels sit inside the plate's top slab)."
         )
 
     qr_size_mm_opt = placement.qr_size_mm if placement is not None else None
@@ -404,27 +504,50 @@ def build_meshes(
             f"{params.size_mm:g} x {params.effective_depth_mm:g} mm plate."
         )
 
-    # --- Base plate ---
-    base_triangles = _extrude_axis_aligned_box(
-        x0=-half_w,
-        y0=-half_d,
-        z0=0.0,
-        x1=+half_w,
-        y1=+half_d,
-        z1=params.base_height_mm,
-    )
-    base_mesh = _triangles_to_mesh(base_triangles)
-
-    # --- QR modules ---
-    dark_rows, dark_cols = np.nonzero(matrix.modules)
-
-    z_top_base = np.float32(params.base_height_mm)
-    z_top_feature = z_top_base + np.float32(params.pixel_height_mm)
+    # Pixel and plate-top Z heights (finish-mode aware).
+    z_plate_top = np.float32(params.base_height_mm)
+    if qr_finish == "extruded":
+        z_pixel_bot = z_plate_top
+        z_pixel_top = z_plate_top + np.float32(params.pixel_height_mm)
+    else:  # flush or sunken: pixels occupy the top slab of the plate.
+        z_pixel_bot = np.float32(params.base_height_mm - params.pixel_height_mm)
+        z_pixel_top = z_plate_top
 
     module_mm_f32 = np.float32(module_mm)
     quiet_offset_mm = np.float32(params.quiet_zone_modules) * module_mm_f32
     qr_left = np.float32(x_offset - qr_half)
+    qr_right = np.float32(x_offset + qr_half)
     qr_top = np.float32(y_offset + qr_half)
+    qr_bottom = np.float32(y_offset - qr_half)
+
+    # --- Base plate (pocketed for sunken finish, solid box otherwise) ---
+    if qr_finish == "sunken":
+        base_triangles = _build_sunken_base(
+            matrix=matrix,
+            quiet_zone_modules=params.quiet_zone_modules,
+            module_mm=module_mm,
+            half_w=half_w,
+            half_d=half_d,
+            qr_left=float(qr_left),
+            qr_right=float(qr_right),
+            qr_top_y=float(qr_top),
+            qr_bottom_y=float(qr_bottom),
+            z_mid=float(z_pixel_bot),
+            z_top=float(z_plate_top),
+        )
+    else:
+        base_triangles = _extrude_axis_aligned_box(
+            x0=-half_w,
+            y0=-half_d,
+            z0=0.0,
+            x1=+half_w,
+            y1=+half_d,
+            z1=params.base_height_mm,
+        )
+    base_mesh = _triangles_to_mesh(base_triangles)
+
+    # --- QR modules ---
+    dark_rows, dark_cols = np.nonzero(matrix.modules)
 
     feature_chunks: list[_FloatArray] = []
 
@@ -442,10 +565,10 @@ def build_meshes(
                 pixel_tris[i * 12 : (i + 1) * 12] = _extrude_axis_aligned_box(
                     float(x0s[i]),
                     float(y0s[i]),
-                    float(z_top_base),
+                    float(z_pixel_bot),
                     float(x1s[i]),
                     float(y1s[i]),
-                    float(z_top_feature),
+                    float(z_pixel_top),
                 )
             feature_chunks.append(pixel_tris)
         else:  # "dot"
@@ -457,7 +580,7 @@ def build_meshes(
                 cy = (float(y0s[i]) + float(y1s[i])) / 2.0
                 poly = _regular_polygon_xy(cx, cy, radius, _DOT_POLYGON_SIDES)
                 pixel_tris[i * tris_per_dot : (i + 1) * tris_per_dot] = _extrude_prism(
-                    poly, float(z_top_base), float(z_top_feature)
+                    poly, float(z_pixel_bot), float(z_pixel_top)
                 )
             feature_chunks.append(pixel_tris)
 
@@ -494,7 +617,7 @@ def build_meshes(
         cell_f32 = np.float32(cell_mm)
         lx0_f = np.float32(lx0)
         ly_top_f = np.float32(ly_top)
-        z_text_top = z_top_base + np.float32(label.extrusion_mm)
+        z_text_top = z_plate_top + np.float32(label.extrusion_mm)
 
         rows_f = dark_r.astype(np.float32)
         cols_f = dark_c.astype(np.float32)
@@ -508,7 +631,7 @@ def build_meshes(
             text_tris[i * 12 : (i + 1) * 12] = _extrude_axis_aligned_box(
                 float(tx0s[i]),
                 float(ty0s[i]),
-                float(z_top_base),
+                float(z_plate_top),
                 float(tx1s[i]),
                 float(ty1s[i]),
                 float(z_text_top),

@@ -9,7 +9,7 @@ from stl.mesh import Mesh
 
 from qr23mf.geometry import GeometryParams, build_meshes
 from qr23mf.qr import QrMatrix, build_matrix
-from qr23mf.writers.stl import write_stl
+from qr23mf.writers.stl import features_split_path, write_stl
 
 
 def _empty_matrix() -> QrMatrix:
@@ -61,3 +61,45 @@ def test_write_stl_produces_deterministic_triangle_payload(tmp_path: Path) -> No
     write_stl(base, pixels, a)
     write_stl(base, pixels, b)
     assert a.read_bytes()[80:] == b.read_bytes()[80:]
+
+
+def test_features_split_path_inserts_suffix_before_extension() -> None:
+    assert features_split_path(Path("coaster.stl")) == Path("coaster_features.stl")
+    assert features_split_path(Path("/tmp/out/plate.stl")) == Path("/tmp/out/plate_features.stl")
+    # No suffix: default to .stl.
+    assert features_split_path(Path("plate")) == Path("plate_features.stl")
+
+
+def test_write_stl_split_writes_two_files(tmp_path: Path) -> None:
+    matrix = build_matrix("qr23mf/writer/split", ec="M")
+    base, pixels = build_meshes(matrix, GeometryParams())
+    out = tmp_path / "plate.stl"
+    written = write_stl(base, pixels, out, split=True)
+    assert len(written) == 2
+    assert written[0] == out
+    assert written[1] == tmp_path / "plate_features.stl"
+    assert out.exists()
+    assert (tmp_path / "plate_features.stl").exists()
+    loaded_base = Mesh.from_file(str(out))
+    loaded_features = Mesh.from_file(str(tmp_path / "plate_features.stl"))
+    assert loaded_base.vectors.shape[0] == base.vectors.shape[0]
+    assert loaded_features.vectors.shape[0] == pixels.vectors.shape[0]
+
+
+def test_write_stl_split_with_empty_pixels_falls_back_to_single_file(
+    tmp_path: Path,
+) -> None:
+    """Split mode with no features emits just the base (no empty feature file)."""
+    base, pixels = build_meshes(_empty_matrix(), GeometryParams(size_mm=50))
+    out = tmp_path / "only_base.stl"
+    written = write_stl(base, pixels, out, split=True)
+    assert written == [out]
+    assert not (tmp_path / "only_base_features.stl").exists()
+
+
+def test_write_stl_non_split_returns_single_path(tmp_path: Path) -> None:
+    matrix = build_matrix("qr23mf/writer/return-value", ec="L")
+    base, pixels = build_meshes(matrix, GeometryParams())
+    out = tmp_path / "plate.stl"
+    written = write_stl(base, pixels, out)
+    assert written == [out]

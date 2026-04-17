@@ -17,6 +17,9 @@ from qr23mf.geometry import (
 )
 from qr23mf.qr import QrMatrix, build_matrix
 
+# All-light / all-dark synthetic matrices are defined near the top of the
+# existing test module; reuse via module-level helpers once defined below.
+
 # --- GeometryParams validation -------------------------------------------------
 
 
@@ -406,3 +409,118 @@ def test_build_meshes_default_extras_produce_byte_identical_output() -> None:
     )
     assert np.array_equal(a_base.vectors, b_base.vectors)
     assert np.array_equal(a_feats.vectors, b_feats.vectors)
+
+
+# --- QR finish: extruded / flush / sunken -------------------------------------
+
+
+def test_invalid_qr_finish_raises() -> None:
+    matrix = _all_light(21)
+    with pytest.raises(ValueError, match="qr_finish must be one of"):
+        build_meshes(matrix, GeometryParams(), qr_finish="debossed")  # type: ignore[arg-type]
+
+
+def test_default_qr_finish_matches_extruded() -> None:
+    matrix = build_matrix("finish-compat", ec="M")
+    params = GeometryParams()
+    a_base, a_feats = build_meshes(matrix, params)
+    b_base, b_feats = build_meshes(matrix, params, qr_finish="extruded")
+    assert np.array_equal(a_base.vectors, b_base.vectors)
+    assert np.array_equal(a_feats.vectors, b_feats.vectors)
+
+
+def test_flush_pixels_occupy_top_slab_of_base() -> None:
+    """Flush pixels must sit between base_h - pixel_h and base_h."""
+    matrix = _all_dark(3)
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    _, pixels = build_meshes(matrix, params, qr_finish="flush")
+    verts = pixels.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == 1.0
+    assert pytest.approx(verts[:, 2].max(), abs=1e-4) == 2.0
+
+
+def test_flush_leaves_base_mesh_unchanged() -> None:
+    matrix = _all_dark(3)
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    base_extruded, _ = build_meshes(matrix, params, qr_finish="extruded")
+    base_flush, _ = build_meshes(matrix, params, qr_finish="flush")
+    assert np.array_equal(base_extruded.vectors, base_flush.vectors)
+
+
+def test_flush_rejects_pixel_height_not_less_than_base() -> None:
+    matrix = _all_dark(3)
+    # pixel_height == base_height: flush would zero out the base.
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=2.0, pixel_height_mm=2.0, quiet_zone_modules=0
+    )
+    with pytest.raises(ValueError, match="pixel_height_mm"):
+        build_meshes(matrix, params, qr_finish="flush")
+
+
+def test_sunken_base_contains_pocket_geometry() -> None:
+    """Sunken base must have more triangles than a plain box when any cell is light.
+
+    A realistic QR has both dark and light cells, so the base mesh is
+    composed of a bottom slab plus per-light-cell top boxes plus any
+    margin strips.
+    """
+    matrix = build_matrix("sunken-base-has-pockets", ec="M")
+    params = GeometryParams(
+        size_mm=60.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=2
+    )
+    base, pixels = build_meshes(matrix, params, qr_finish="sunken")
+    # Bottom slab (12) + quiet-zone ring + light-cell boxes must exceed 12.
+    assert base.vectors.shape[0] > 12
+    assert base.vectors.shape[0] % 12 == 0
+    # Pixels still fill the top slab (same z range as flush).
+    verts = pixels.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == 1.0
+    assert pytest.approx(verts[:, 2].max(), abs=1e-4) == 2.0
+
+
+def test_sunken_plate_bottom_face_reaches_z_zero() -> None:
+    """Sunken base spans z in [0, base_h]; min is 0, max is base_h.
+
+    Use a realistic matrix with both light and dark cells so the top layer
+    has both pocketed (dark) and filled (light) regions.
+    """
+    matrix = build_matrix("sunken-bottom-z", ec="M")
+    params = GeometryParams(
+        size_mm=60.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=2
+    )
+    base, _ = build_meshes(matrix, params, qr_finish="sunken")
+    verts = base.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == 0.0
+    assert pytest.approx(verts[:, 2].max(), abs=1e-4) == 2.0
+
+
+def test_sunken_all_light_matrix_emits_full_plate() -> None:
+    """With zero dark modules the sunken base should cover the full plate top."""
+    matrix = _all_light(5)
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    base, pixels = build_meshes(matrix, params, qr_finish="sunken")
+    # Features mesh is empty (no dark modules).
+    assert pixels.vectors.shape == (0, 3, 3)
+    # Base covers full plate footprint (min/max XY = +/- half, min/max Z = 0/base_h).
+    verts = base.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 0].min(), abs=1e-4) == -15.0
+    assert pytest.approx(verts[:, 0].max(), abs=1e-4) == +15.0
+    assert pytest.approx(verts[:, 1].min(), abs=1e-4) == -15.0
+    assert pytest.approx(verts[:, 1].max(), abs=1e-4) == +15.0
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == 0.0
+    assert pytest.approx(verts[:, 2].max(), abs=1e-4) == 2.0
+
+
+def test_sunken_rejects_pixel_height_not_less_than_base() -> None:
+    matrix = _all_dark(3)
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=1.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    with pytest.raises(ValueError, match="pixel_height_mm"):
+        build_meshes(matrix, params, qr_finish="sunken")

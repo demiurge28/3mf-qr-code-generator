@@ -33,6 +33,7 @@ from qr23mf import __version__
 from qr23mf.geometry import (
     GeometryParams,
     ModuleStyle,
+    QrFinish,
     QrPlacement,
     TextLabel,
     build_meshes,
@@ -55,6 +56,11 @@ _LABEL_BOX_FILL: str = "#e3f3ff"
 _LABEL_BOX_OUTLINE: str = "#0047ab"
 _LABEL_SELECTED_FILL: str = "#fff2e0"
 _LABEL_SELECTED_OUTLINE: str = "#ff6600"
+_QR_SELECTED_OUTLINE: str = "#ff6600"
+
+# Step size (mm) for nudging the QR position via arrow keys once it's
+# clicked on the layout canvas.
+_QR_NUDGE_MM: float = 0.5
 
 # Update-check constants (GitHub public API, no auth required).
 _UPDATE_CHECK_URL: str = (
@@ -90,6 +96,9 @@ class _SettingsApp(ttk.Frame):
         self._drag_label_index: int | None = None
         self._drag_moved: bool = False
         self._drag_press_xy: tuple[int, int] = (0, 0)
+        # True when the QR footprint was the last thing clicked on the
+        # canvas; arrow keys then nudge the QR X/Y offset.
+        self._qr_selected: bool = False
         self._build()
 
     def _build(self) -> None:
@@ -142,6 +151,29 @@ class _SettingsApp(ttk.Frame):
             text="Dots",
             variable=self._style_var,
             value="dot",
+        ).pack(side=tk.LEFT)
+
+        finish_row = ttk.Frame(qr)
+        finish_row.pack(fill=tk.X, padx=6, pady=3)
+        ttk.Label(finish_row, text="Finish:").pack(side=tk.LEFT)
+        self._finish_var = tk.StringVar(value="extruded")
+        ttk.Radiobutton(
+            finish_row,
+            text="Extruded",
+            variable=self._finish_var,
+            value="extruded",
+        ).pack(side=tk.LEFT, padx=(8, 6))
+        ttk.Radiobutton(
+            finish_row,
+            text="Flush",
+            variable=self._finish_var,
+            value="flush",
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Radiobutton(
+            finish_row,
+            text="Sunken",
+            variable=self._finish_var,
+            value="sunken",
         ).pack(side=tk.LEFT)
 
         # --- Text labels (form on the left, interactive canvas on the right)
@@ -218,6 +250,9 @@ class _SettingsApp(ttk.Frame):
         ttk.Button(buttons, text="Remove selected", command=self._remove_label).pack(
             side=tk.LEFT, padx=(6, 0)
         )
+        ttk.Button(buttons, text="Remove all", command=self._remove_all_labels).pack(
+            side=tk.LEFT, padx=(6, 0)
+        )
 
         # Right panel: interactive layout canvas + usage hint.
         self._layout_canvas = tk.Canvas(
@@ -246,6 +281,12 @@ class _SettingsApp(ttk.Frame):
         self._layout_canvas.bind("<Button-2>", self._on_canvas_right_click)
         self._layout_canvas.bind("<Button-3>", self._on_canvas_right_click)
         self._layout_canvas.bind("<Control-Button-1>", self._on_canvas_right_click)
+        # Arrow-key nudging for the QR position (only active while the QR
+        # has been selected with the mouse).
+        self._layout_canvas.bind("<Left>", lambda _e: self._nudge_qr(-_QR_NUDGE_MM, 0.0))
+        self._layout_canvas.bind("<Right>", lambda _e: self._nudge_qr(+_QR_NUDGE_MM, 0.0))
+        self._layout_canvas.bind("<Up>", lambda _e: self._nudge_qr(0.0, +_QR_NUDGE_MM))
+        self._layout_canvas.bind("<Down>", lambda _e: self._nudge_qr(0.0, -_QR_NUDGE_MM))
 
         # Redraw when plate or QR placement values change (typing in a spinbox).
         for layout_var in (self._plate_w, self._plate_d, self._qr_size, self._qr_x, self._qr_y):
@@ -333,6 +374,20 @@ class _SettingsApp(ttk.Frame):
         self._labels_list.delete(idx)
         self._redraw_layout()
 
+    def _remove_all_labels(self) -> None:
+        if not self._labels:
+            messagebox.showinfo("Remove all labels", "There are no labels to remove.")
+            return
+        count = len(self._labels)
+        if not messagebox.askyesno(
+            "Remove all labels",
+            f"Remove all {count} label{'s' if count != 1 else ''}?",
+        ):
+            return
+        self._labels.clear()
+        self._labels_list.delete(0, tk.END)
+        self._redraw_layout()
+
     # --- Layout canvas (interactive placement) -------------------------------
 
     def _on_layout_vars_changed(self, *_args: object) -> None:
@@ -372,6 +427,55 @@ class _SettingsApp(ttk.Frame):
                     return int(tag[len("label-") :])
         return None
 
+    def _qr_footprint_bounds_mm(self) -> tuple[float, float, float, float] | None:
+        """Return ``(x_left, y_bottom, x_right, y_top)`` of the QR footprint in mm.
+
+        Returns ``None`` when any spinbox contains an unparseable intermediate
+        value (e.g. during typing) or the plate dims are non-positive.
+        """
+        try:
+            plate_w = float(self._plate_w.get())
+            plate_d = float(self._plate_d.get())
+            qr_size = float(self._qr_size.get())
+            qr_x = float(self._qr_x.get())
+            qr_y = float(self._qr_y.get())
+        except (ValueError, tk.TclError):
+            return None
+        if plate_w <= 0 or plate_d <= 0:
+            return None
+        footprint = qr_size if qr_size > 0 else min(plate_w, plate_d)
+        half = footprint / 2.0
+        return qr_x - half, qr_y - half, qr_x + half, qr_y + half
+
+    def _point_in_qr_footprint(self, x_mm: float, y_mm: float) -> bool:
+        bounds = self._qr_footprint_bounds_mm()
+        if bounds is None:
+            return False
+        x0, y0, x1, y1 = bounds
+        return x0 <= x_mm <= x1 and y0 <= y_mm <= y1
+
+    def _nudge_qr(self, dx_mm: float, dy_mm: float) -> None:
+        """Move the QR by (dx, dy) mm, clamped to keep it inside the plate."""
+        if not self._qr_selected:
+            return
+        try:
+            x = float(self._qr_x.get())
+            y = float(self._qr_y.get())
+            plate_w = float(self._plate_w.get())
+            plate_d = float(self._plate_d.get())
+            qr_size = float(self._qr_size.get())
+        except (ValueError, tk.TclError):
+            return
+        footprint = qr_size if qr_size > 0 else min(plate_w, plate_d)
+        half = footprint / 2.0
+        new_x = max(-plate_w / 2.0 + half, min(plate_w / 2.0 - half, x + dx_mm))
+        new_y = max(-plate_d / 2.0 + half, min(plate_d / 2.0 - half, y + dy_mm))
+        self._qr_x.set(new_x)
+        self._qr_y.set(new_y)
+        # Layout redraws via the var trace, but call explicitly in case
+        # the nudge produced a clamped no-op (no trace would fire).
+        self._redraw_layout()
+
     def _redraw_layout(self) -> None:
         canvas = self._layout_canvas
         canvas.delete("all")
@@ -390,7 +494,7 @@ class _SettingsApp(ttk.Frame):
             px0, py0, px1, py1, fill=_PLATE_FILL, outline=_PLATE_OUTLINE, width=2
         )
 
-        # QR footprint (dashed outline).
+        # QR footprint (dashed outline; highlighted when clicked-on).
         try:
             qr_size = float(self._qr_size.get())
             qr_x = float(self._qr_x.get())
@@ -400,7 +504,9 @@ class _SettingsApp(ttk.Frame):
         qr_footprint = qr_size if qr_size > 0 else min(plate_w, plate_d)
         qx0, qy0 = to_c(qr_x - qr_footprint / 2.0, qr_y + qr_footprint / 2.0)
         qx1, qy1 = to_c(qr_x + qr_footprint / 2.0, qr_y - qr_footprint / 2.0)
-        canvas.create_rectangle(qx0, qy0, qx1, qy1, outline="#888", dash=(4, 3), width=1)
+        qr_outline = _QR_SELECTED_OUTLINE if self._qr_selected else "#888"
+        qr_width = 2 if self._qr_selected else 1
+        canvas.create_rectangle(qx0, qy0, qx1, qy1, outline=qr_outline, dash=(4, 3), width=qr_width)
 
         # Text labels.
         selected = self._selected_label_index()
@@ -428,14 +534,30 @@ class _SettingsApp(ttk.Frame):
             )
 
     def _on_canvas_press(self, event: tk.Event[tk.Misc]) -> None:
+        # Focus the canvas so subsequent arrow-key events reach our bindings.
+        self._layout_canvas.focus_set()
         ex, ey = int(event.x), int(event.y)
         self._drag_press_xy = (ex, ey)
         self._drag_moved = False
         self._drag_label_index = self._label_under_cursor(ex, ey)
         if self._drag_label_index is not None:
+            # Clicking a label deselects the QR and selects the label.
+            self._qr_selected = False
             self._labels_list.selection_clear(0, tk.END)
             self._labels_list.selection_set(self._drag_label_index)
             self._on_label_selected(None)
+            return
+        # Not on a label. Check whether the click lands inside the QR footprint.
+        world = self._canvas_to_world(float(ex), float(ey))
+        if world is not None and self._point_in_qr_footprint(*world):
+            # Select the QR so arrow keys nudge it.
+            self._qr_selected = True
+            self._labels_list.selection_clear(0, tk.END)
+        else:
+            # Empty plate area: deselect everything. The release handler will
+            # treat the click as "add a label here" using current form values.
+            self._qr_selected = False
+        self._redraw_layout()
 
     def _on_canvas_drag(self, event: tk.Event[tk.Misc]) -> None:
         if self._drag_label_index is None:
@@ -477,8 +599,9 @@ class _SettingsApp(ttk.Frame):
         self._redraw_layout()
 
     def _on_canvas_release(self, event: tk.Event[tk.Misc]) -> None:
-        # Empty-area click with no drag motion = add a new label.
-        if self._drag_label_index is None and not self._drag_moved:
+        # Empty-area click (not on a label, not on QR) with no drag motion =
+        # add a new label at that point.
+        if self._drag_label_index is None and not self._drag_moved and not self._qr_selected:
             content = self._label_text.get().strip()
             if not content:
                 messagebox.showinfo(
@@ -561,7 +684,16 @@ class _SettingsApp(ttk.Frame):
     def _gather_design(
         self,
     ) -> (
-        tuple[GeometryParams, QrPlacement, ModuleStyle, tuple[TextLabel, ...], str, EcLevel] | None
+        tuple[
+            GeometryParams,
+            QrPlacement,
+            ModuleStyle,
+            QrFinish,
+            tuple[TextLabel, ...],
+            str,
+            EcLevel,
+        ]
+        | None
     ):
         try:
             params = GeometryParams(
@@ -587,6 +719,18 @@ class _SettingsApp(ttk.Frame):
             return None
         style: ModuleStyle = "square" if style_raw == "square" else "dot"
 
+        finish_raw = self._finish_var.get()
+        finish: QrFinish
+        if finish_raw == "extruded":
+            finish = "extruded"
+        elif finish_raw == "flush":
+            finish = "flush"
+        elif finish_raw == "sunken":
+            finish = "sunken"
+        else:
+            messagebox.showerror("Invalid input", f"Unknown QR finish {finish_raw!r}.")
+            return None
+
         text = self._text_var.get()
         if not text:
             messagebox.showerror("Invalid input", "Payload text must not be empty.")
@@ -607,13 +751,13 @@ class _SettingsApp(ttk.Frame):
         else:
             ec = "H"
 
-        return params, placement, style, tuple(self._labels), text, ec
+        return params, placement, style, finish, tuple(self._labels), text, ec
 
     def _on_preview(self) -> None:
         gathered = self._gather_design()
         if gathered is None:
             return
-        params, placement, style, labels, text, ec = gathered
+        params, placement, style, finish, labels, text, ec = gathered
 
         try:
             matrix = build_matrix(text, ec=ec)
@@ -622,6 +766,7 @@ class _SettingsApp(ttk.Frame):
                 params,
                 placement=placement,
                 module_style=style,
+                qr_finish=finish,
                 text_labels=labels,
             )
         except ValueError as exc:
@@ -630,9 +775,9 @@ class _SettingsApp(ttk.Frame):
 
         self._status_var.set(
             f"Previewing: base={base.vectors.shape[0]} triangles, "
-            f"features={features.vectors.shape[0]} triangles."
+            f"features={features.vectors.shape[0]} triangles (finish: {finish})."
         )
-        _PreviewWindow(self, params, placement, style, labels, matrix, base, features)
+        _PreviewWindow(self, params, placement, style, finish, labels, matrix, base, features)
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +794,7 @@ class _PreviewWindow(tk.Toplevel):
         params: GeometryParams,
         placement: QrPlacement,
         style: ModuleStyle,
+        finish: QrFinish,
         labels: tuple[TextLabel, ...],
         matrix: QrMatrix,
         base: Mesh,
@@ -659,6 +805,7 @@ class _PreviewWindow(tk.Toplevel):
         self._params = params
         self._placement = placement
         self._style = style
+        self._finish = finish
         self._labels = labels
         self._matrix = matrix
         self._base = base
@@ -676,12 +823,23 @@ class _PreviewWindow(tk.Toplevel):
 
         summary = (
             f"Plate: {params.size_mm:g} x {params.effective_depth_mm:g} x "
-            f"{params.base_height_mm:g} mm | Style: {style} | "
+            f"{params.base_height_mm:g} mm | Style: {style} | Finish: {finish} | "
             f"Text labels: {len(labels)} | "
             f"Triangles: base={base.vectors.shape[0]}, "
             f"features={features.vectors.shape[0]}"
         )
         ttk.Label(self, text=summary).pack(padx=12, anchor=tk.W)
+
+        # Split-output checkbox: when on, Create writes base + features as
+        # two STL files so the slicer sees two selectable bodies (one per
+        # filament). Default on because the Finish modes are most useful
+        # with multi-material printing.
+        self._split_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            self,
+            text="Write separate STLs for base and features (for multi-filament slicers)",
+            variable=self._split_var,
+        ).pack(padx=12, anchor=tk.W, pady=(4, 0))
 
         buttons = ttk.Frame(self)
         buttons.pack(fill=tk.X, padx=12, pady=(6, 12))
@@ -761,12 +919,20 @@ class _PreviewWindow(tk.Toplevel):
         if not out:
             return
         path = Path(out)
+        split = bool(self._split_var.get())
         try:
-            write_stl(self._base, self._features, path)
+            written = write_stl(self._base, self._features, path, split=split)
         except OSError as exc:
             messagebox.showerror("Write failed", f"Could not write STL: {exc}")
             return
-        messagebox.showinfo("Saved", f"Wrote {path}")
+        if len(written) == 1:
+            messagebox.showinfo("Saved", f"Wrote {written[0]}")
+        else:
+            lines = "\n".join(f"\u2022 {p}" for p in written)
+            messagebox.showinfo(
+                "Saved",
+                f"Wrote {len(written)} files (import both for per-filament selection):\n{lines}",
+            )
 
 
 # ---------------------------------------------------------------------------
