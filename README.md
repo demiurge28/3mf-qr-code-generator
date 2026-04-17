@@ -2,7 +2,7 @@
 
 `qr23mf` — turn a string or URL into a 3D-printable QR code mesh: two-color **3MF** with per-body color metadata, or single-color **STL**. Built as a small, pure-Python CLI.
 
-> **Status:** bootstrap skeleton only. Functionality lands scope-by-scope — see `vbrief/proposed/` and `vbrief/active/` for the work-in-progress plan.
+> **Status:** early. The `generate` subcommand produces usable single-color STL output today; two-color 3MF output lands with the `3mf-writer` scope. Scope-by-scope work-in-progress lives in `vbrief/active/` and `vbrief/proposed/`.
 
 ## Install (development)
 
@@ -22,6 +22,84 @@ pipx install .
 ```
 
 Either command exposes a `qr23mf` binary on `PATH`.
+
+## Usage
+
+The CLI currently has one real subcommand, `generate`, plus top-level
+`--help` / `--version` flags.
+
+### Quickstart
+
+```bash
+# Print the mesh summary for a payload with sensible defaults
+qr23mf generate --text "https://example.com"
+
+# Additionally save a single-color binary STL to disk
+qr23mf generate --text "https://example.com" --out coaster.stl
+
+# Higher error-correction level, smaller plate, thicker pixels
+qr23mf generate \
+  --text "https://example.com" \
+  --ec Q \
+  --size 50 \
+  --base-height 1.5 \
+  --pixel-height 1.2 \
+  --out keychain.stl
+```
+
+The command prints a human-readable summary that is handy for sanity-checking
+the generated geometry before you slice it:
+
+```
+Generated QR mesh:
+  text              'https://example.com'
+  error correction  M
+  size              60 mm x 60 mm
+  base height       2 mm
+  pixel height      1 mm
+  quiet zone        4 modules
+  base triangles    12
+  pixel boxes       322
+  pixel triangles   3864
+  total triangles   3876
+Wrote coaster.stl
+```
+
+### Flag reference
+
+| Flag | Default | Description |
+|---|---|---|
+| `--text`, `-t` | _(required)_ | Payload to encode. Must be a non-empty string (URLs, plain text, etc.). |
+| `--out`, `-o` | _unset_ | Optional output path. When provided, a single-body binary STL is written; if the path has no suffix, `.stl` is appended. |
+| `--size` | `60.0` | Base plate side length in millimeters (plate is square). |
+| `--base-height` | `2.0` | Base plate thickness in millimeters. |
+| `--pixel-height` | `1.0` | Extrusion height of the dark QR modules above the base's top face. |
+| `--ec` | `M` | QR error-correction level. One of `L`, `M`, `Q`, `H` (case-insensitive). Higher levels tolerate more damage but require a larger QR version. |
+| `--quiet-zone` | `4` | Quiet-zone margin expressed in module units. The QR specification recommends 4. |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `2` | Usage / validation error (unknown EC level, empty text, physical dimensions too small, etc.). Message written to stderr. |
+| `3` | I/O error while writing `--out`. Message written to stderr. |
+
+### Coordinate system
+
+Meshes are produced in millimeter units and positioned so the base plate's
+bottom face lies on `z = 0` and the plate is centered on the XY origin.
+Row 0 of the QR matrix is placed along `+Y` (i.e. the "top" of the code when
+viewed from `+Z`). Dark modules sit on top of the base as separate axis-
+aligned boxes with outward-facing normals, so slicers see watertight solids.
+
+### What's not here yet
+
+* `--format 3mf` (two-color 3MF with embedded color metadata) — blocked on
+  the `3mf-writer` scope.
+* `--base-color` / `--pixel-color` — same.
+* Batch mode, preset profiles, embossed vs debossed, logo overlay — later
+  scopes tracked in `vbrief/proposed/`.
 
 ## Development workflow
 
