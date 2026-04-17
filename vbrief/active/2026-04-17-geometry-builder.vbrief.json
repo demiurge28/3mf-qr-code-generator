@@ -4,12 +4,12 @@
     "author": "agent:deft-directive-setup",
     "description": "Triangle-mesh geometry builder for QR base and pixel meshes",
     "created": "2026-04-17T15:15:00Z",
-    "updated": "2026-04-17T15:15:00Z"
+    "updated": "2026-04-17T16:12:00Z"
   },
   "plan": {
     "id": "geometry-builder",
     "title": "Geometry builder — matrix + params to base and pixel meshes",
-    "status": "proposed",
+    "status": "running",
     "tags": ["geometry", "core"],
     "narratives": {
       "Overview": "Translate a QrMatrix + parameter struct into two explicit triangle meshes suitable for STL/3MF export.",
