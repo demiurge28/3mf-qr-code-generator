@@ -14,7 +14,7 @@
     "narratives": {
       "Overview": "Establish a deterministic test corpus that pins the byte-level output of the pipeline so future refactors can not silently change geometry or 3MF structure.",
       "Acceptance": "tests/ directory contains: (a) unit tests per module under tests/unit/{qr,geometry,writers,cli}_test.py, (b) integration tests under tests/integration/ that run the full pipeline via CliRunner, (c) golden fixtures under tests/fixtures/ — for a fixed set of (text, ec, format, params) tuples, commit both expected.stl and expected.3mf bytes; tests compare produced bytes to fixtures exactly. A `task regen-fixtures` target regenerates the fixtures intentionally. `task test:coverage` enforces ≥85% overall and per-module, failing the build otherwise. CI runs `task check` on ubuntu/macos/windows and fails on any divergence.",
-      "Scope": "tests/ tree + Taskfile updates. pytest.ini_options for `addopts = -ra --strict-markers --strict-config` and coverage config. Use `pytest-cov` with `--cov=qr2stl --cov-branch --cov-fail-under=85`.",
+      "Scope": "tests/ tree + Taskfile updates. pytest.ini_options for `addopts = -ra --strict-markers --strict-config` and coverage config. Use `pytest-cov` with `--cov=qr23mf --cov-branch --cov-fail-under=85`.",
       "Traces": "NFR-1, NFR-2"
     },
     "items": [],
@@ -23,7 +23,7 @@
         "type": "x-vbrief/context",
         "uri": "./specification.vbrief.json",
         "url": "./specification.vbrief.json",
-        "id": "qr2stl-specification",
+        "id": "qr23mf-specification",
         "description": "Parent specification"
       },
       {

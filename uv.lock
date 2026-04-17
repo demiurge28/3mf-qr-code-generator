@@ -3,6 +3,46 @@ revision = 3
 requires-python = ">=3.11"
 
 [[package]]
+name = "3mf-qr-code-generator"
+version = "0.0.1"
+source = { editable = "." }
+dependencies = [
+    { name = "numpy-stl" },
+    { name = "segno" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+threemf = [
+    { name = "lib3mf", marker = "sys_platform != 'win32'" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "lib3mf", marker = "sys_platform != 'win32' and extra == 'threemf'", specifier = ">=2.3" },
+    { name = "numpy-stl", specifier = ">=3.1,<4" },
+    { name = "segno", specifier = ">=1.6,<2" },
+    { name = "typer", specifier = ">=0.12,<1" },
+]
+provides-extras = ["threemf"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-cov", specifier = ">=5" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -475,46 +515,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/13/4c/ef8b7b1046d65c1f18ca31e5235c7d6627ca2b3f389ab1d44a74d22f5cc9/python_utils-3.9.1.tar.gz", hash = "sha256:eb574b4292415eb230f094cbf50ab5ef36e3579b8f09e9f2ba74af70891449a0", size = 35403, upload-time = "2024-11-26T00:38:58.736Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d4/69/31c82567719b34d8f6b41077732589104883771d182a9f4ff3e71430999a/python_utils-3.9.1-py2.py3-none-any.whl", hash = "sha256:0273d7363c7ad4b70999b2791d5ba6b55333d6f7a4e4c8b6b39fb82b5fab4613", size = 32078, upload-time = "2024-11-26T00:38:57.488Z" },
-]
-
-[[package]]
-name = "qr2stl"
-version = "0.0.1"
-source = { editable = "." }
-dependencies = [
-    { name = "numpy-stl" },
-    { name = "segno" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-threemf = [
-    { name = "lib3mf", marker = "sys_platform != 'win32'" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "lib3mf", marker = "sys_platform != 'win32' and extra == 'threemf'", specifier = ">=2.3" },
-    { name = "numpy-stl", specifier = ">=3.1,<4" },
-    { name = "segno", specifier = ">=1.6,<2" },
-    { name = "typer", specifier = ">=0.12,<1" },
-]
-provides-extras = ["threemf"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-cov", specifier = ">=5" },
-    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]

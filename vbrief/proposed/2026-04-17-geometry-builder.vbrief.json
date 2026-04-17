@@ -13,8 +13,8 @@
     "tags": ["geometry", "core"],
     "narratives": {
       "Overview": "Translate a QrMatrix + parameter struct into two explicit triangle meshes suitable for STL/3MF export.",
-      "Acceptance": "`qr2stl.geometry.build_meshes(matrix: QrMatrix, params: GeometryParams) -> tuple[Mesh, Mesh]` returns (base_mesh, pixels_mesh). Base mesh is a flat axis-aligned box of params.size × params.size × params.base_height. Pixels mesh is the union of axis-aligned boxes for each `True` module in the matrix, centered over the base, with quiet-zone margin subtracted from the usable area, each extruded params.pixel_height above the base's top surface. GeometryParams dataclass: size_mm (float, default 60), base_height_mm (float, default 2.0), pixel_height_mm (float, default 1.0), quiet_zone_modules (int, default 4). Invalid params (negative, size too small for the module count) raise ValueError. Triangle winding is consistent (CCW from outside); all normals face outward. Output is deterministic for a given (matrix, params). Coverage ≥85% on this module.",
-      "Scope": "src/qr2stl/geometry.py — `GeometryParams` dataclass, `build_meshes()` returning two numpy-stl `Mesh` objects. No file I/O. Helper: `_extrude_axis_aligned_box(x0, y0, z0, x1, y1, z1) -> ndarray` producing 12 triangles per box.",
+      "Acceptance": "`qr23mf.geometry.build_meshes(matrix: QrMatrix, params: GeometryParams) -> tuple[Mesh, Mesh]` returns (base_mesh, pixels_mesh). Base mesh is a flat axis-aligned box of params.size × params.size × params.base_height. Pixels mesh is the union of axis-aligned boxes for each `True` module in the matrix, centered over the base, with quiet-zone margin subtracted from the usable area, each extruded params.pixel_height above the base's top surface. GeometryParams dataclass: size_mm (float, default 60), base_height_mm (float, default 2.0), pixel_height_mm (float, default 1.0), quiet_zone_modules (int, default 4). Invalid params (negative, size too small for the module count) raise ValueError. Triangle winding is consistent (CCW from outside); all normals face outward. Output is deterministic for a given (matrix, params). Coverage ≥85% on this module.",
+      "Scope": "src/qr23mf/geometry.py — `GeometryParams` dataclass, `build_meshes()` returning two numpy-stl `Mesh` objects. No file I/O. Helper: `_extrude_axis_aligned_box(x0, y0, z0, x1, y1, z1) -> ndarray` producing 12 triangles per box.",
       "Traces": "FR-2, FR-4, NFR-1, NFR-2"
     },
     "items": [],
@@ -23,7 +23,7 @@
         "type": "x-vbrief/context",
         "uri": "./specification.vbrief.json",
         "url": "./specification.vbrief.json",
-        "id": "qr2stl-specification",
+        "id": "qr23mf-specification",
         "description": "Parent specification"
       },
       {

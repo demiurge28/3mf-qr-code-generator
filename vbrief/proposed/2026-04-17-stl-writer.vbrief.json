@@ -13,8 +13,8 @@
     "tags": ["writer", "stl"],
     "narratives": {
       "Overview": "Combine the two meshes from the geometry layer into a single-body binary STL on disk.",
-      "Acceptance": "`qr2stl.writers.stl.write_stl(base: Mesh, pixels: Mesh, path: Path) -> None` writes a valid binary STL containing the merged triangles (base first, pixels second). The file opens cleanly in PrusaSlicer / Bambu Studio / OrcaSlicer / Blender without warnings. Reading the file back via numpy-stl yields the same triangle count as sum(len(base.vectors), len(pixels.vectors)). Deterministic: byte-identical output for identical input on repeated runs (same platform).",
-      "Scope": "src/qr2stl/writers/stl.py — `write_stl()` uses numpy-stl's `Mesh.save(path, mode=Mode.BINARY)`. Merges via numpy concatenation on the data array. No header metadata beyond numpy-stl's default.",
+      "Acceptance": "`qr23mf.writers.stl.write_stl(base: Mesh, pixels: Mesh, path: Path) -> None` writes a valid binary STL containing the merged triangles (base first, pixels second). The file opens cleanly in PrusaSlicer / Bambu Studio / OrcaSlicer / Blender without warnings. Reading the file back via numpy-stl yields the same triangle count as sum(len(base.vectors), len(pixels.vectors)). Deterministic: byte-identical output for identical input on repeated runs (same platform).",
+      "Scope": "src/qr23mf/writers/stl.py — `write_stl()` uses numpy-stl's `Mesh.save(path, mode=Mode.BINARY)`. Merges via numpy concatenation on the data array. No header metadata beyond numpy-stl's default.",
       "Traces": "FR-3, NFR-1"
     },
     "items": [],
@@ -23,7 +23,7 @@
         "type": "x-vbrief/context",
         "uri": "./specification.vbrief.json",
         "url": "./specification.vbrief.json",
-        "id": "qr2stl-specification",
+        "id": "qr23mf-specification",
         "description": "Parent specification"
       },
       {

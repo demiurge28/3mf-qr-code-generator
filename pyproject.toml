@@ -3,14 +3,14 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "qr2stl"
+name = "3mf-qr-code-generator"
 version = "0.0.1"
-description = "CLI that turns a string/URL into a 3D-printable STL or two-color 3MF of a QR code."
+description = "CLI that turns a string/URL into a 3D-printable two-color 3MF (or single-color STL) of a QR code."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "ben" }]
-keywords = ["qr", "stl", "3mf", "3d-printing", "cli"]
+keywords = ["qr", "3mf", "stl", "3d-printing", "cli"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Environment :: Console",
@@ -35,7 +35,7 @@ dependencies = [
 threemf = ["lib3mf>=2.3; platform_system != 'Windows'"]
 
 [project.scripts]
-qr2stl = "qr2stl.cli:app"
+qr23mf = "qr23mf.cli:app"
 
 [dependency-groups]
 dev = [
@@ -46,10 +46,10 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/qr2stl"]
+packages = ["src/qr23mf"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/qr2stl", "README.md", "pyproject.toml", "LICENSE"]
+include = ["src/qr23mf", "README.md", "pyproject.toml", "LICENSE"]
 
 [tool.ruff]
 line-length = 100
@@ -76,7 +76,7 @@ strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 show_error_codes = true
-files = ["src/qr2stl", "tests"]
+files = ["src/qr23mf", "tests"]
 
 [[tool.mypy.overrides]]
 module = ["stl", "stl.*", "numpy.*"]
@@ -89,7 +89,7 @@ pythonpath = ["src"]
 
 [tool.coverage.run]
 branch = true
-source = ["qr2stl"]
+source = ["qr23mf"]
 
 [tool.coverage.report]
 fail_under = 85
