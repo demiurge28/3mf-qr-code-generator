@@ -103,20 +103,81 @@ aligned boxes with outward-facing normals, so slicers see watertight solids.
 
 ## GUI (Tkinter)
 
-`qr23mf gui` opens a Tkinter configurator with:
-
-* Base plate width / depth / thickness (rectangular plates supported)
-* QR code size and X / Y offset on the plate (0 mm size = auto-fit)
-* Module extrusion, quiet-zone margin, module style (**Squares** or **Dots**)
-* Text labels — add, update, or remove any number of labels with their own
-  position, height, and extrusion
-* **Preview** button that opens a top-down 2D preview window
-* **Create…** button in the preview window that writes a binary STL via
-  a native save dialog
-
 ```bash
 qr23mf gui
 ```
+
+Opens a Tkinter configurator with a Settings window (the main designer)
+and a Preview window (opened from **Preview**).
+
+### Settings window
+
+* **Payload** text and EC level (`L` / `M` / `Q` / `H`).
+* **Base plate** width / depth / thickness (rectangular plates supported).
+* **QR code** size and X / Y offset on the plate (`0 mm size` = auto-fit);
+  module extrusion; quiet-zone margin.
+* **Module style**: **Squares** (axis-aligned boxes) or **Dots**
+  (cylindrical prisms).
+* **Finish**: **Extruded** (raised above the plate, default), **Flush**
+  (pixels embedded in the plate top slab), or **Sunken** (pixels occupy
+  the top slab *and* the base has matching pockets carved into its top
+  face, so the QR is visibly recessed even in single-color prints).
+* **Text labels** — add, update, remove, or **Remove all**; each label has
+  its own text, X / Y position, height, and extrusion.
+* **Check for updates** button — queries the public GitHub Releases API
+  (5 s timeout) and shows "No New Updates" when current, or offers to
+  open the Releases page in your browser when a newer tag is available.
+
+### Interactive layout canvas
+
+A live top-down canvas sits next to the text-label form. It always shows
+the plate outline, the QR footprint (dashed), and every text label. All
+spinbox edits redraw it live.
+
+Mouse / trackpad interactions:
+
+* **Left-click on empty plate** — adds a new text label at that point
+  using the current Text / Height / Extrusion form values.
+* **Left-click + drag a label** — moves it, clamped to the plate bounds;
+  the X / Y spinboxes and listbox entry update in real time.
+* **Right-click a label** (or **Ctrl+Click** on macOS) — removes it with
+  a confirmation dialog.
+* **Left-click inside the QR footprint** — selects the QR (highlighted
+  with an orange dashed outline). With the QR selected, the arrow keys
+  **← → ↑ ↓** nudge it in 0.5 mm steps, clamped to keep it inside the
+  plate.
+
+Three toggles below the canvas:
+
+* **Grid (5 mm)** — overlays a 5 mm alignment grid on the plate. Every
+  5th line is rendered heavier (25 mm major spacing for free).
+* **Snap** — when enabled, label drags and click-to-add both snap
+  independently on X and Y to the nearest alignment anchor within 1 mm.
+  Anchors include the plate center, plate edges, QR center and edges,
+  every other label's center, and — when the grid is also on — every
+  grid line. Moves that land more than 1 mm from any anchor pass through
+  unchanged.
+* **Show spacing** — when enabled, the currently selected label is
+  annotated with dashed blue guides and mm distances from each side of
+  its bounding box to the nearest plate edge, plus to the nearest QR
+  footprint edge in X / Y when the label doesn't overlap the QR along
+  that axis.
+
+### Preview window
+
+Press **Preview** to open a 2D top-down preview with a one-line summary
+(plate dims, style, finish, label count, triangle counts):
+
+* **Back** — close the preview and return to the settings window.
+* **Write separate STLs for base and features** checkbox (default on) —
+  when **Create…** is pressed, writes the base and the QR + text feature
+  meshes to two sibling STL files (`plate.stl` and `plate_features.stl`)
+  so slicers like Bambu Studio, OrcaSlicer, and PrusaSlicer load them as
+  two independently selectable bodies — assign a different filament to
+  each for a two-color print. Uncheck to write a single combined STL
+  instead.
+* **Create…** — opens a native save dialog and writes the STL(s); the
+  success dialog lists every file written.
 
 ### macOS / Homebrew note
 

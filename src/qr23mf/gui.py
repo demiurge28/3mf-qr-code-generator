@@ -19,10 +19,12 @@ by default; ``brew install python-tk@3.11`` provides it).
 from __future__ import annotations
 
 import json
+import math
 import tkinter as tk
 import urllib.error
 import urllib.request
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -62,6 +64,16 @@ _QR_SELECTED_OUTLINE: str = "#ff6600"
 # clicked on the layout canvas.
 _QR_NUDGE_MM: float = 0.5
 
+# Alignment-grid and snap constants for the interactive layout canvas.
+_GRID_SPACING_MM: float = 5.0
+_SNAP_TOLERANCE_MM: float = 1.0
+_GRID_MINOR_COLOR: str = "#ededed"
+_GRID_MAJOR_COLOR: str = "#c6c6c6"
+_GRID_MAJOR_EVERY: int = 5  # every 5 minor lines = 25 mm when step is 5 mm
+_SPACING_LINE_COLOR: str = "#0047ab"
+_SPACING_TEXT_COLOR: str = "#0047ab"
+_SPACING_FONT_PX: int = 8
+
 # Update-check constants (GitHub public API, no auth required).
 _UPDATE_CHECK_URL: str = (
     "https://api.github.com/repos/demiurge28/3mf-qr-code-generator/releases/latest"
@@ -99,6 +111,11 @@ class _SettingsApp(ttk.Frame):
         # True when the QR footprint was the last thing clicked on the
         # canvas; arrow keys then nudge the QR X/Y offset.
         self._qr_selected: bool = False
+        # Layout canvas toggles: alignment grid overlay, snap-to-align, and
+        # per-label spacing annotations.
+        self._grid_var = tk.BooleanVar(value=False)
+        self._snap_var = tk.BooleanVar(value=False)
+        self._spacing_var = tk.BooleanVar(value=False)
         self._build()
 
     def _build(self) -> None:
@@ -274,6 +291,27 @@ class _SettingsApp(ttk.Frame):
             justify=tk.LEFT,
             foreground="#555",
         ).pack(anchor=tk.W, pady=(4, 0))
+
+        # Layout options: grid overlay, snap-to-align, spacing display.
+        options_row = ttk.Frame(right_panel)
+        options_row.pack(anchor=tk.W, pady=(6, 0))
+        ttk.Checkbutton(
+            options_row,
+            text=f"Grid ({_GRID_SPACING_MM:g} mm)",
+            variable=self._grid_var,
+            command=self._redraw_layout,
+        ).pack(side=tk.LEFT)
+        ttk.Checkbutton(
+            options_row,
+            text="Snap",
+            variable=self._snap_var,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Checkbutton(
+            options_row,
+            text="Show spacing",
+            variable=self._spacing_var,
+            command=self._redraw_layout,
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
         self._layout_canvas.bind("<Button-1>", self._on_canvas_press)
         self._layout_canvas.bind("<B1-Motion>", self._on_canvas_drag)
@@ -454,6 +492,161 @@ class _SettingsApp(ttk.Frame):
         x0, y0, x1, y1 = bounds
         return x0 <= x_mm <= x1 and y0 <= y_mm <= y1
 
+    def _collect_snap_anchors(
+        self, exclude_label_index: int | None = None
+    ) -> tuple[list[float], list[float]]:
+        """Build (x_anchors, y_anchors) of mm positions for snap-to-align.
+
+        Anchors include the plate center (0, 0), plate edges, the QR center
+        and edges (if the QR footprint is well-defined), every other label's
+        center, and — when the grid overlay is enabled — every grid line.
+        """
+        xs: list[float] = [0.0]
+        ys: list[float] = [0.0]
+        try:
+            plate_w = float(self._plate_w.get())
+            plate_d = float(self._plate_d.get())
+        except (ValueError, tk.TclError):
+            return xs, ys
+        if plate_w <= 0 or plate_d <= 0:
+            return xs, ys
+        xs.extend([-plate_w / 2.0, +plate_w / 2.0])
+        ys.extend([-plate_d / 2.0, +plate_d / 2.0])
+
+        qbounds = self._qr_footprint_bounds_mm()
+        if qbounds is not None:
+            qx0, qy0, qx1, qy1 = qbounds
+            xs.extend([qx0, (qx0 + qx1) / 2.0, qx1])
+            ys.extend([qy0, (qy0 + qy1) / 2.0, qy1])
+
+        for i, lab in enumerate(self._labels):
+            if i == exclude_label_index:
+                continue
+            xs.append(lab.x_mm)
+            ys.append(lab.y_mm)
+
+        if self._grid_var.get():
+            step = _GRID_SPACING_MM
+            k_min = math.ceil(-plate_w / 2.0 / step)
+            k_max = math.floor(plate_w / 2.0 / step)
+            xs.extend(k * step for k in range(k_min, k_max + 1))
+            k_min = math.ceil(-plate_d / 2.0 / step)
+            k_max = math.floor(plate_d / 2.0 / step)
+            ys.extend(k * step for k in range(k_min, k_max + 1))
+
+        return xs, ys
+
+    def _draw_grid_overlay(
+        self,
+        canvas: tk.Canvas,
+        to_c: Callable[[float, float], tuple[float, float]],
+        plate_w: float,
+        plate_d: float,
+    ) -> None:
+        """Draw vertical and horizontal grid lines at every ``_GRID_SPACING_MM``.
+
+        Lines spanning the plate are drawn inside the plate's bounds only.
+        Every ``_GRID_MAJOR_EVERY``-th line uses the heavier major color
+        (e.g. 25 mm increments for a 5 mm grid).
+        """
+        step = _GRID_SPACING_MM
+        k_min = math.ceil(-plate_w / 2.0 / step)
+        k_max = math.floor(plate_w / 2.0 / step)
+        for k in range(k_min, k_max + 1):
+            x = k * step
+            x_top, y_top = to_c(x, +plate_d / 2.0)
+            x_bot, y_bot = to_c(x, -plate_d / 2.0)
+            color = _GRID_MAJOR_COLOR if k % _GRID_MAJOR_EVERY == 0 else _GRID_MINOR_COLOR
+            canvas.create_line(x_top, y_top, x_bot, y_bot, fill=color)
+
+        k_min = math.ceil(-plate_d / 2.0 / step)
+        k_max = math.floor(plate_d / 2.0 / step)
+        for k in range(k_min, k_max + 1):
+            y = k * step
+            x_left, y_left = to_c(-plate_w / 2.0, y)
+            x_right, y_right = to_c(+plate_w / 2.0, y)
+            color = _GRID_MAJOR_COLOR if k % _GRID_MAJOR_EVERY == 0 else _GRID_MINOR_COLOR
+            canvas.create_line(x_left, y_left, x_right, y_right, fill=color)
+
+    def _estimate_label_bbox_mm(self, label: TextLabel) -> tuple[float, float, float, float]:
+        """Return ``(x0, y0, x1, y1)`` for the label's approximate bbox in mm.
+
+        Uses the same glyph-width heuristic as :meth:`_redraw_layout`.
+        """
+        est_w_mm = max(len(label.content) * label.height_mm * 0.6, label.height_mm)
+        est_h_mm = label.height_mm
+        return (
+            label.x_mm - est_w_mm / 2.0,
+            label.y_mm - est_h_mm / 2.0,
+            label.x_mm + est_w_mm / 2.0,
+            label.y_mm + est_h_mm / 2.0,
+        )
+
+    def _draw_spacing_for_label(
+        self,
+        label_idx: int,
+        canvas: tk.Canvas,
+        to_c: Callable[[float, float], tuple[float, float]],
+        plate_w: float,
+        plate_d: float,
+    ) -> None:
+        """Annotate the selected label with mm distances to plate edges and QR.
+
+        Dashed guides run from each side of the label's bounding box to the
+        nearest plate edge, and (when it doesn't overlap) to the nearest QR
+        footprint edge in X and Y. Each guide is labelled with its distance
+        in millimetres.
+        """
+        label = self._labels[label_idx]
+        lx0, ly0, lx1, ly1 = self._estimate_label_bbox_mm(label)
+        mid_x = (lx0 + lx1) / 2.0
+        mid_y = (ly0 + ly1) / 2.0
+
+        def annotate(
+            x0_mm: float, y0_mm: float, x1_mm: float, y1_mm: float, distance_mm: float
+        ) -> None:
+            if distance_mm <= 0:
+                return
+            p0 = to_c(x0_mm, y0_mm)
+            p1 = to_c(x1_mm, y1_mm)
+            canvas.create_line(
+                p0[0],
+                p0[1],
+                p1[0],
+                p1[1],
+                fill=_SPACING_LINE_COLOR,
+                dash=(3, 2),
+                width=1,
+            )
+            mid = to_c((x0_mm + x1_mm) / 2.0, (y0_mm + y1_mm) / 2.0)
+            canvas.create_text(
+                mid[0],
+                mid[1],
+                text=f"{distance_mm:.1f} mm",
+                fill=_SPACING_TEXT_COLOR,
+                font=("TkDefaultFont", _SPACING_FONT_PX),
+            )
+
+        # Distances from label bbox to each plate edge.
+        annotate(-plate_w / 2.0, mid_y, lx0, mid_y, lx0 - (-plate_w / 2.0))
+        annotate(lx1, mid_y, +plate_w / 2.0, mid_y, (+plate_w / 2.0) - lx1)
+        annotate(mid_x, ly1, mid_x, +plate_d / 2.0, (+plate_d / 2.0) - ly1)
+        annotate(mid_x, -plate_d / 2.0, mid_x, ly0, ly0 - (-plate_d / 2.0))
+
+        # Distance to the QR footprint in each axis (only when the label
+        # doesn't overlap the QR along that axis).
+        qbounds = self._qr_footprint_bounds_mm()
+        if qbounds is not None:
+            qx0, qy0, qx1, qy1 = qbounds
+            if lx1 < qx0:
+                annotate(lx1, mid_y, qx0, mid_y, qx0 - lx1)
+            elif lx0 > qx1:
+                annotate(qx1, mid_y, lx0, mid_y, lx0 - qx1)
+            if ly1 < qy0:
+                annotate(mid_x, ly1, mid_x, qy0, qy0 - ly1)
+            elif ly0 > qy1:
+                annotate(mid_x, qy1, mid_x, ly0, ly0 - qy1)
+
     def _nudge_qr(self, dx_mm: float, dy_mm: float) -> None:
         """Move the QR by (dx, dy) mm, clamped to keep it inside the plate."""
         if not self._qr_selected:
@@ -487,12 +680,17 @@ class _SettingsApp(ttk.Frame):
         def to_c(x_mm: float, y_mm: float) -> tuple[float, float]:
             return cw / 2.0 + x_mm * scale, ch / 2.0 - y_mm * scale
 
-        # Plate outline.
+        # Plate outline (drawn first; grid overlays the plate fill, features
+        # and labels sit on top).
         px0, py0 = to_c(-plate_w / 2.0, +plate_d / 2.0)
         px1, py1 = to_c(+plate_w / 2.0, -plate_d / 2.0)
         canvas.create_rectangle(
             px0, py0, px1, py1, fill=_PLATE_FILL, outline=_PLATE_OUTLINE, width=2
         )
+
+        # Alignment grid overlay (optional).
+        if self._grid_var.get():
+            self._draw_grid_overlay(canvas, to_c, plate_w, plate_d)
 
         # QR footprint (dashed outline; highlighted when clicked-on).
         try:
@@ -532,6 +730,10 @@ class _SettingsApp(ttk.Frame):
                 fill=outline,
                 tags=tags,
             )
+
+        # Spacing annotations for the currently selected label (optional).
+        if self._spacing_var.get() and selected is not None:
+            self._draw_spacing_for_label(selected, canvas, to_c, plate_w, plate_d)
 
     def _on_canvas_press(self, event: tk.Event[tk.Misc]) -> None:
         # Focus the canvas so subsequent arrow-key events reach our bindings.
@@ -579,6 +781,10 @@ class _SettingsApp(ttk.Frame):
         y_mm = max(-plate_d / 2.0, min(plate_d / 2.0, y_mm))
 
         i = self._drag_label_index
+        if self._snap_var.get():
+            xs, ys = self._collect_snap_anchors(exclude_label_index=i)
+            x_mm = _snap_coord(x_mm, xs)
+            y_mm = _snap_coord(y_mm, ys)
         existing = self._labels[i]
         try:
             new_label = TextLabel(
@@ -613,6 +819,10 @@ class _SettingsApp(ttk.Frame):
                 world = self._canvas_to_world(ex, ey)
                 if world is not None:
                     x_mm, y_mm = world
+                    if self._snap_var.get():
+                        xs, ys = self._collect_snap_anchors(exclude_label_index=None)
+                        x_mm = _snap_coord(x_mm, xs)
+                        y_mm = _snap_coord(y_mm, ys)
                     try:
                         new_label = TextLabel(
                             content=content,
@@ -995,6 +1205,23 @@ def _add_int_spinbox(
 def _grid_row(parent: tk.Misc, row: int, label: str, widget: tk.Widget) -> None:
     ttk.Label(parent, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 6), pady=2)
     widget.grid(row=row, column=1, sticky=tk.W, pady=2)
+
+
+def _snap_coord(value: float, anchors: list[float]) -> float:
+    """Return ``value`` snapped to the nearest anchor within ``_SNAP_TOLERANCE_MM``.
+
+    Falls back to ``value`` unchanged when no anchor is closer than the
+    tolerance, so snapping degrades gracefully when no alignment target is
+    relevant.
+    """
+    best = value
+    best_dist = _SNAP_TOLERANCE_MM
+    for anchor in anchors:
+        d = abs(value - anchor)
+        if d < best_dist:
+            best_dist = d
+            best = anchor
+    return best
 
 
 # ---------------------------------------------------------------------------
