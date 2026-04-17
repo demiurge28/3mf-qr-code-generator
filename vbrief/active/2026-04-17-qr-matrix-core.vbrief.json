@@ -4,12 +4,12 @@
     "author": "agent:deft-directive-setup",
     "description": "QR matrix generation wrapping segno",
     "created": "2026-04-17T15:15:00Z",
-    "updated": "2026-04-17T15:15:00Z"
+    "updated": "2026-04-17T15:56:00Z"
   },
   "plan": {
     "id": "qr-matrix-core",
     "title": "QR matrix core — wrap segno and expose a binary matrix",
-    "status": "proposed",
+    "status": "running",
     "tags": ["qr", "core"],
     "narratives": {
       "Overview": "Produce a deterministic binary matrix (list[list[bool]] or numpy ndarray) from a text/URL input, with configurable error-correction level.",
