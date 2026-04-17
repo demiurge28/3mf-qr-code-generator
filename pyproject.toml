@@ -1,0 +1,102 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qr2stl"
+version = "0.0.1"
+description = "CLI that turns a string/URL into a 3D-printable STL or two-color 3MF of a QR code."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "ben" }]
+keywords = ["qr", "stl", "3mf", "3d-printing", "cli"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Graphics :: 3D Modeling",
+  "Topic :: Printing",
+  "Typing :: Typed",
+]
+dependencies = [
+  "segno>=1.6,<2",
+  "numpy-stl>=3.1,<4",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+threemf = ["lib3mf>=2.3; platform_system != 'Windows'"]
+
+[project.scripts]
+qr2stl = "qr2stl.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/qr2stl"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/qr2stl", "README.md", "pyproject.toml", "LICENSE"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "W",   # pycodestyle + pyflakes
+  "I",             # isort
+  "B",             # bugbear
+  "UP",            # pyupgrade
+  "SIM",           # simplify
+  "RUF",           # ruff-specific
+]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
+files = ["src/qr2stl", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["stl", "stl.*", "numpy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["qr2stl"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "pragma: no cover",
+]
