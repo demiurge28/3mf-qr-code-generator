@@ -18,13 +18,18 @@ by default; ``brew install python-tk@3.11`` provides it).
 
 from __future__ import annotations
 
+import json
 import tkinter as tk
+import urllib.error
+import urllib.request
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import numpy as np
 from stl.mesh import Mesh
 
+from qr23mf import __version__
 from qr23mf.geometry import (
     GeometryParams,
     ModuleStyle,
@@ -40,10 +45,23 @@ __all__ = ["run"]
 # Canvas rendering constants.
 _CANVAS_PX: int = 480
 _CANVAS_MARGIN_PX: int = 20
+_LAYOUT_CANVAS_PX: int = 300
+_LAYOUT_CANVAS_MARGIN_PX: int = 12
 _PLATE_FILL: str = "#f0f0e8"
 _PLATE_OUTLINE: str = "#222"
 _MODULE_FILL: str = "#111"
 _TEXT_FILL: str = "#0047ab"
+_LABEL_BOX_FILL: str = "#e3f3ff"
+_LABEL_BOX_OUTLINE: str = "#0047ab"
+_LABEL_SELECTED_FILL: str = "#fff2e0"
+_LABEL_SELECTED_OUTLINE: str = "#ff6600"
+
+# Update-check constants (GitHub public API, no auth required).
+_UPDATE_CHECK_URL: str = (
+    "https://api.github.com/repos/demiurge28/3mf-qr-code-generator/releases/latest"
+)
+_UPDATE_RELEASES_HTML_URL: str = "https://github.com/demiurge28/3mf-qr-code-generator/releases"
+_UPDATE_CHECK_TIMEOUT_SEC: float = 5.0
 
 
 def run() -> None:
@@ -68,6 +86,10 @@ class _SettingsApp(ttk.Frame):
     def __init__(self, master: tk.Misc) -> None:
         super().__init__(master)
         self._labels = []
+        # Drag state for the interactive layout canvas.
+        self._drag_label_index: int | None = None
+        self._drag_moved: bool = False
+        self._drag_press_xy: tuple[int, int] = (0, 0)
         self._build()
 
     def _build(self) -> None:
@@ -122,15 +144,30 @@ class _SettingsApp(ttk.Frame):
             value="dot",
         ).pack(side=tk.LEFT)
 
-        # --- Text labels ----------------------------------------------------
-        labels = ttk.LabelFrame(self, text="Text labels")
-        labels.pack(fill=tk.BOTH, expand=True, pady=6)
-        self._labels_list = tk.Listbox(labels, height=4, exportselection=False)
-        self._labels_list.pack(fill=tk.X, padx=6, pady=(6, 3))
+        # --- Text labels (form on the left, interactive canvas on the right)
+        labels_frame = ttk.LabelFrame(
+            self,
+            text=(
+                "Text labels  \u2014  click plate to add  \u00b7  drag to move  "
+                "\u00b7  right-click to remove"
+            ),
+        )
+        labels_frame.pack(fill=tk.BOTH, expand=True, pady=6)
+        labels_frame.grid_columnconfigure(0, weight=1)
+        labels_frame.grid_columnconfigure(1, weight=0)
+
+        left_panel = ttk.Frame(labels_frame)
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=6)
+        right_panel = ttk.Frame(labels_frame)
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
+
+        # Left panel: listbox, form, buttons
+        self._labels_list = tk.Listbox(left_panel, height=4, exportselection=False)
+        self._labels_list.pack(fill=tk.X)
         self._labels_list.bind("<<ListboxSelect>>", self._on_label_selected)
 
-        form = ttk.Frame(labels)
-        form.pack(fill=tk.X, padx=6, pady=(0, 6))
+        form = ttk.Frame(left_panel)
+        form.pack(fill=tk.X, pady=(6, 0))
 
         self._label_text = tk.StringVar()
         self._label_x = tk.DoubleVar(value=0.0)
@@ -172,8 +209,8 @@ class _SettingsApp(ttk.Frame):
             ),
         )
 
-        buttons = ttk.Frame(labels)
-        buttons.pack(fill=tk.X, padx=6, pady=(0, 6))
+        buttons = ttk.Frame(left_panel)
+        buttons.pack(fill=tk.X, pady=(6, 0))
         ttk.Button(buttons, text="Add label", command=self._add_label).pack(side=tk.LEFT)
         ttk.Button(buttons, text="Update selected", command=self._update_label).pack(
             side=tk.LEFT, padx=(6, 0)
@@ -182,12 +219,51 @@ class _SettingsApp(ttk.Frame):
             side=tk.LEFT, padx=(6, 0)
         )
 
+        # Right panel: interactive layout canvas + usage hint.
+        self._layout_canvas = tk.Canvas(
+            right_panel,
+            width=_LAYOUT_CANVAS_PX,
+            height=_LAYOUT_CANVAS_PX,
+            bg="white",
+            highlightthickness=1,
+            highlightbackground="#ccc",
+        )
+        self._layout_canvas.pack()
+        ttk.Label(
+            right_panel,
+            text=(
+                "Left-click on plate   \u2192 add a label using current form values\n"
+                "Left-click + drag     \u2192 move the label under the cursor\n"
+                "Right-click on label  \u2192 remove it (Ctrl+Click on macOS)"
+            ),
+            justify=tk.LEFT,
+            foreground="#555",
+        ).pack(anchor=tk.W, pady=(4, 0))
+
+        self._layout_canvas.bind("<Button-1>", self._on_canvas_press)
+        self._layout_canvas.bind("<B1-Motion>", self._on_canvas_drag)
+        self._layout_canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        self._layout_canvas.bind("<Button-2>", self._on_canvas_right_click)
+        self._layout_canvas.bind("<Button-3>", self._on_canvas_right_click)
+        self._layout_canvas.bind("<Control-Button-1>", self._on_canvas_right_click)
+
+        # Redraw when plate or QR placement values change (typing in a spinbox).
+        for layout_var in (self._plate_w, self._plate_d, self._qr_size, self._qr_x, self._qr_y):
+            layout_var.trace_add("write", self._on_layout_vars_changed)
+        # Initial paint once the widget is mapped.
+        self.after_idle(self._redraw_layout)
+
         # --- Footer ----------------------------------------------------------
         footer = ttk.Frame(self)
         footer.pack(fill=tk.X, pady=(12, 0))
         self._status_var = tk.StringVar(value="Ready.")
         ttk.Label(footer, textvariable=self._status_var).pack(side=tk.LEFT)
         ttk.Button(footer, text="Preview", command=self._on_preview).pack(side=tk.RIGHT)
+        ttk.Button(
+            footer,
+            text="Check for updates",
+            command=self._check_for_updates,
+        ).pack(side=tk.RIGHT, padx=(0, 6))
 
     # --- Label list handlers -------------------------------------------------
 
@@ -207,6 +283,7 @@ class _SettingsApp(ttk.Frame):
         self._label_y.set(label.y_mm)
         self._label_h.set(label.height_mm)
         self._label_ext.set(label.extrusion_mm)
+        self._redraw_layout()
 
     def _build_label_from_form(self) -> TextLabel | None:
         content = self._label_text.get().strip()
@@ -231,6 +308,7 @@ class _SettingsApp(ttk.Frame):
             return
         self._labels.append(label)
         self._labels_list.insert(tk.END, _label_display(label))
+        self._redraw_layout()
 
     def _update_label(self) -> None:
         idx = self._selected_label_index()
@@ -244,6 +322,7 @@ class _SettingsApp(ttk.Frame):
         self._labels_list.delete(idx)
         self._labels_list.insert(idx, _label_display(label))
         self._labels_list.selection_set(idx)
+        self._redraw_layout()
 
     def _remove_label(self) -> None:
         idx = self._selected_label_index()
@@ -252,6 +331,230 @@ class _SettingsApp(ttk.Frame):
             return
         del self._labels[idx]
         self._labels_list.delete(idx)
+        self._redraw_layout()
+
+    # --- Layout canvas (interactive placement) -------------------------------
+
+    def _on_layout_vars_changed(self, *_args: object) -> None:
+        self._redraw_layout()
+
+    def _get_layout_transform(self) -> tuple[float, float, float, float, float] | None:
+        """Return ``(canvas_w, canvas_h, scale, plate_w, plate_d)`` or ``None``.
+
+        Returns ``None`` when the plate dimensions are invalid (e.g. the user
+        is mid-edit and the spinbox contains an empty string).
+        """
+        try:
+            plate_w = float(self._plate_w.get())
+            plate_d = float(self._plate_d.get())
+        except (ValueError, tk.TclError):
+            return None
+        if plate_w <= 0 or plate_d <= 0:
+            return None
+        cw = float(self._layout_canvas.cget("width"))
+        ch = float(self._layout_canvas.cget("height"))
+        margin = _LAYOUT_CANVAS_MARGIN_PX
+        scale = min((cw - 2 * margin) / plate_w, (ch - 2 * margin) / plate_d)
+        return cw, ch, scale, plate_w, plate_d
+
+    def _canvas_to_world(self, cx: float, cy: float) -> tuple[float, float] | None:
+        xform = self._get_layout_transform()
+        if xform is None:
+            return None
+        cw, ch, scale, _pw, _pd = xform
+        return (cx - cw / 2.0) / scale, -(cy - ch / 2.0) / scale
+
+    def _label_under_cursor(self, cx: float, cy: float) -> int | None:
+        items = self._layout_canvas.find_overlapping(cx, cy, cx, cy)
+        for item in items:
+            for tag in self._layout_canvas.gettags(item):
+                if tag.startswith("label-"):
+                    return int(tag[len("label-") :])
+        return None
+
+    def _redraw_layout(self) -> None:
+        canvas = self._layout_canvas
+        canvas.delete("all")
+        xform = self._get_layout_transform()
+        if xform is None:
+            return
+        cw, ch, scale, plate_w, plate_d = xform
+
+        def to_c(x_mm: float, y_mm: float) -> tuple[float, float]:
+            return cw / 2.0 + x_mm * scale, ch / 2.0 - y_mm * scale
+
+        # Plate outline.
+        px0, py0 = to_c(-plate_w / 2.0, +plate_d / 2.0)
+        px1, py1 = to_c(+plate_w / 2.0, -plate_d / 2.0)
+        canvas.create_rectangle(
+            px0, py0, px1, py1, fill=_PLATE_FILL, outline=_PLATE_OUTLINE, width=2
+        )
+
+        # QR footprint (dashed outline).
+        try:
+            qr_size = float(self._qr_size.get())
+            qr_x = float(self._qr_x.get())
+            qr_y = float(self._qr_y.get())
+        except (ValueError, tk.TclError):
+            qr_size, qr_x, qr_y = 0.0, 0.0, 0.0
+        qr_footprint = qr_size if qr_size > 0 else min(plate_w, plate_d)
+        qx0, qy0 = to_c(qr_x - qr_footprint / 2.0, qr_y + qr_footprint / 2.0)
+        qx1, qy1 = to_c(qr_x + qr_footprint / 2.0, qr_y - qr_footprint / 2.0)
+        canvas.create_rectangle(qx0, qy0, qx1, qy1, outline="#888", dash=(4, 3), width=1)
+
+        # Text labels.
+        selected = self._selected_label_index()
+        for i, label in enumerate(self._labels):
+            # Approximate bounding box for drawing + hit-testing. The exact
+            # rasterized geometry isn't needed here; the preview mesh is built
+            # from Pillow's rasterization at "Preview" time.
+            est_w_mm = max(len(label.content) * label.height_mm * 0.6, label.height_mm)
+            est_h_mm = label.height_mm
+            lx0, ly0 = to_c(label.x_mm - est_w_mm / 2.0, label.y_mm + est_h_mm / 2.0)
+            lx1, ly1 = to_c(label.x_mm + est_w_mm / 2.0, label.y_mm - est_h_mm / 2.0)
+            is_selected = i == selected
+            outline = _LABEL_SELECTED_OUTLINE if is_selected else _LABEL_BOX_OUTLINE
+            fill = _LABEL_SELECTED_FILL if is_selected else _LABEL_BOX_FILL
+            tags = ("label", f"label-{i}")
+            canvas.create_rectangle(
+                lx0, ly0, lx1, ly1, fill=fill, outline=outline, width=2, tags=tags
+            )
+            canvas.create_text(
+                (lx0 + lx1) / 2.0,
+                (ly0 + ly1) / 2.0,
+                text=label.content,
+                fill=outline,
+                tags=tags,
+            )
+
+    def _on_canvas_press(self, event: tk.Event[tk.Misc]) -> None:
+        ex, ey = int(event.x), int(event.y)
+        self._drag_press_xy = (ex, ey)
+        self._drag_moved = False
+        self._drag_label_index = self._label_under_cursor(ex, ey)
+        if self._drag_label_index is not None:
+            self._labels_list.selection_clear(0, tk.END)
+            self._labels_list.selection_set(self._drag_label_index)
+            self._on_label_selected(None)
+
+    def _on_canvas_drag(self, event: tk.Event[tk.Misc]) -> None:
+        if self._drag_label_index is None:
+            return
+        ex, ey = int(event.x), int(event.y)
+        if (
+            abs(ex - self._drag_press_xy[0]) + abs(ey - self._drag_press_xy[1]) < 2
+            and not self._drag_moved
+        ):
+            return
+        world = self._canvas_to_world(ex, ey)
+        xform = self._get_layout_transform()
+        if world is None or xform is None:
+            return
+        self._drag_moved = True
+        x_mm, y_mm = world
+        _, _, _, plate_w, plate_d = xform
+        x_mm = max(-plate_w / 2.0, min(plate_w / 2.0, x_mm))
+        y_mm = max(-plate_d / 2.0, min(plate_d / 2.0, y_mm))
+
+        i = self._drag_label_index
+        existing = self._labels[i]
+        try:
+            new_label = TextLabel(
+                content=existing.content,
+                x_mm=x_mm,
+                y_mm=y_mm,
+                height_mm=existing.height_mm,
+                extrusion_mm=existing.extrusion_mm,
+            )
+        except ValueError:
+            return
+        self._labels[i] = new_label
+        self._labels_list.delete(i)
+        self._labels_list.insert(i, _label_display(new_label))
+        self._labels_list.selection_set(i)
+        self._label_x.set(x_mm)
+        self._label_y.set(y_mm)
+        self._redraw_layout()
+
+    def _on_canvas_release(self, event: tk.Event[tk.Misc]) -> None:
+        # Empty-area click with no drag motion = add a new label.
+        if self._drag_label_index is None and not self._drag_moved:
+            content = self._label_text.get().strip()
+            if not content:
+                messagebox.showinfo(
+                    "Add label",
+                    "Enter text content in the form first, then click on the plate.",
+                )
+            else:
+                ex, ey = int(event.x), int(event.y)
+                world = self._canvas_to_world(ex, ey)
+                if world is not None:
+                    x_mm, y_mm = world
+                    try:
+                        new_label = TextLabel(
+                            content=content,
+                            x_mm=x_mm,
+                            y_mm=y_mm,
+                            height_mm=float(self._label_h.get()),
+                            extrusion_mm=float(self._label_ext.get()),
+                        )
+                    except (ValueError, tk.TclError) as exc:
+                        messagebox.showerror("Invalid label", str(exc))
+                    else:
+                        self._labels.append(new_label)
+                        self._labels_list.insert(tk.END, _label_display(new_label))
+                        self._labels_list.selection_clear(0, tk.END)
+                        self._labels_list.selection_set(tk.END)
+                        self._redraw_layout()
+        self._drag_label_index = None
+        self._drag_moved = False
+
+    def _on_canvas_right_click(self, event: tk.Event[tk.Misc]) -> None:
+        ex, ey = int(event.x), int(event.y)
+        idx = self._label_under_cursor(ex, ey)
+        if idx is None:
+            return
+        content = self._labels[idx].content
+        if not messagebox.askyesno("Remove label", f"Remove label {content!r}?"):
+            return
+        del self._labels[idx]
+        self._labels_list.delete(idx)
+        self._redraw_layout()
+
+    # --- Update check --------------------------------------------------------
+
+    def _check_for_updates(self) -> None:
+        self._status_var.set("Checking for updates\u2026")
+        self.update_idletasks()
+        try:
+            latest = _fetch_latest_release_tag()
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            self._status_var.set("Update check failed.")
+            messagebox.showerror(
+                "Update check failed",
+                f"Could not reach GitHub to check for updates:\n{exc}",
+            )
+            return
+        except ValueError as exc:
+            self._status_var.set("Update check failed.")
+            messagebox.showerror(
+                "Update check failed",
+                f"Unexpected response from GitHub:\n{exc}",
+            )
+            return
+
+        if latest is None or not _is_newer(latest, __version__):
+            self._status_var.set(f"No New Updates (running {__version__}).")
+            messagebox.showinfo("Check for updates", "No New Updates")
+            return
+
+        self._status_var.set(f"Update available: {latest}.")
+        if messagebox.askyesno(
+            "Update available",
+            f"qr23mf {latest} is available (you have {__version__}).\n\n"
+            "Open the releases page in your browser?",
+        ):
+            webbrowser.open(_UPDATE_RELEASES_HTML_URL)
 
     # --- Preview flow --------------------------------------------------------
 
@@ -526,3 +829,61 @@ def _add_int_spinbox(
 def _grid_row(parent: tk.Misc, row: int, label: str, widget: tk.Widget) -> None:
     ttk.Label(parent, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 6), pady=2)
     widget.grid(row=row, column=1, sticky=tk.W, pady=2)
+
+
+# ---------------------------------------------------------------------------
+# Update check helpers
+# ---------------------------------------------------------------------------
+
+
+def _fetch_latest_release_tag(timeout: float = _UPDATE_CHECK_TIMEOUT_SEC) -> str | None:
+    """Return the latest release tag name from GitHub, or ``None`` if missing.
+
+    Raises ``urllib.error.URLError`` / ``OSError`` / ``TimeoutError`` for
+    network problems and ``ValueError`` if the JSON payload is malformed.
+    """
+    req = urllib.request.Request(
+        _UPDATE_CHECK_URL,
+        headers={
+            "User-Agent": f"qr23mf/{__version__}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(str(exc)) from exc
+    if not isinstance(payload, dict):
+        raise ValueError("GitHub response was not a JSON object")
+    tag = payload.get("tag_name")
+    if tag is None:
+        return None
+    if not isinstance(tag, str):
+        raise ValueError(f"Unexpected tag_name type: {type(tag).__name__}")
+    return tag
+
+
+def _is_newer(latest_tag: str, current: str) -> bool:
+    """Return True iff ``latest_tag`` represents a newer release than ``current``.
+
+    Parses both as dotted integer tuples after stripping a leading ``v``/``V``
+    and any pre-release / local suffix. Falls back to string inequality when
+    either version can't be parsed as integers.
+    """
+
+    def _normalize(s: str) -> str:
+        s = s.lstrip("vV")
+        s = s.split("+", 1)[0]
+        s = s.split("-", 1)[0]
+        return s
+
+    try:
+        latest_tuple = tuple(int(p) for p in _normalize(latest_tag).split(".") if p)
+        current_tuple = tuple(int(p) for p in _normalize(current).split(".") if p)
+    except ValueError:
+        return latest_tag != current
+    if not latest_tuple or not current_tuple:
+        return latest_tag != current
+    return latest_tuple > current_tuple
