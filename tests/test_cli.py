@@ -7,6 +7,7 @@ STL file) end-to-end.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from stl.mesh import Mesh
@@ -16,6 +17,23 @@ from qr23mf import __version__
 from qr23mf.cli import app
 
 runner = CliRunner()
+
+# Typer renders ``--help`` through rich, which uses ANSI styling and wraps to
+# the terminal width. CI runs on a non-TTY with ``COLUMNS`` unset (defaulting
+# to 80), which both colors flag tokens and line-wraps them. These env vars
+# suppress styling and give rich enough width to emit each flag on one line.
+_WIDE_PLAIN_ENV: dict[str, str] = {
+    "NO_COLOR": "1",
+    "COLUMNS": "200",
+    "TERM": "dumb",
+}
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI escape sequences from ``text``."""
+    return _ANSI_RE.sub("", text)
 
 
 def test_help_exits_zero_and_prints_program_name() -> None:
@@ -46,8 +64,10 @@ def test_no_args_shows_help_and_is_not_error() -> None:
 
 
 def test_generate_help_lists_all_flags() -> None:
-    result = runner.invoke(app, ["generate", "--help"])
+    result = runner.invoke(app, ["generate", "--help"], env=_WIDE_PLAIN_ENV)
     assert result.exit_code == 0
+    # Belt-and-suspenders: strip any ANSI that leaked through despite NO_COLOR.
+    plain = _plain(result.stdout)
     for flag in (
         "--text",
         "--out",
@@ -57,7 +77,7 @@ def test_generate_help_lists_all_flags() -> None:
         "--ec",
         "--quiet-zone",
     ):
-        assert flag in result.stdout
+        assert flag in plain, f"{flag!r} missing from help output:\n{plain}"
 
 
 def test_generate_prints_summary_for_valid_input() -> None:
