@@ -1,0 +1,68 @@
+version: '3'
+
+# Project-level Taskfile for qr2stl.
+#
+# Install Task: https://taskfile.dev/installation/
+# All tasks assume `uv` (https://docs.astral.sh/uv/) is available and
+# `uv sync --all-extras` has been run at least once.
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  sync:
+    desc: Install / refresh Python dependencies via uv
+    cmds:
+      - uv sync --all-extras
+
+  fmt:
+    desc: Format source with ruff
+    cmds:
+      - uv run ruff format src tests
+
+  fmt:check:
+    desc: Verify source is ruff-formatted (no changes)
+    cmds:
+      - uv run ruff format --check src tests
+
+  lint:
+    desc: Lint with ruff (autofix off)
+    cmds:
+      - uv run ruff check src tests
+
+  typecheck:
+    desc: Static type-check with mypy (strict)
+    cmds:
+      - uv run mypy
+
+  test:
+    desc: Run pytest without coverage
+    cmds:
+      - uv run pytest
+
+  test:coverage:
+    desc: Run pytest with branch coverage and the 85% gate
+    cmds:
+      - uv run pytest --cov=qr2stl --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=85
+
+  check:
+    desc: "Pre-commit gate: format check + lint + typecheck + tests w/ coverage"
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: typecheck
+      - task: test:coverage
+
+  build:
+    desc: Build wheel + sdist into dist/
+    cmds:
+      - uv build
+
+  clean:
+    desc: Remove caches and build artifacts
+    cmds:
+      - rm -rf build dist .pytest_cache .mypy_cache .ruff_cache coverage.xml .coverage
+      - find . -type d -name '__pycache__' -prune -exec rm -rf {} +
+      - find . -type d -name '*.egg-info' -prune -exec rm -rf {} +

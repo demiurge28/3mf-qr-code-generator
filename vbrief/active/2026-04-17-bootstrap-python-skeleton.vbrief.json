@@ -4,12 +4,12 @@
     "author": "agent:deft-directive-setup",
     "description": "Bootstrap Python package skeleton for qr2stl",
     "created": "2026-04-17T15:15:00Z",
-    "updated": "2026-04-17T15:15:00Z"
+    "updated": "2026-04-17T15:48:00Z"
   },
   "plan": {
     "id": "bootstrap-python-skeleton",
     "title": "Bootstrap Python skeleton (pyproject.toml, uv, Taskfile, CI)",
-    "status": "proposed",
+    "status": "running",
     "tags": ["bootstrap", "infra"],
     "narratives": {
       "Overview": "Stand up the project skeleton so all downstream scopes have a working test/build/lint loop.",
