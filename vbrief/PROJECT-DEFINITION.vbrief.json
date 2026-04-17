@@ -2,7 +2,7 @@
   "vBRIEFInfo": {
     "version": "0.5",
     "description": "Project definition -- synthesized gestalt of the project.",
-    "updated": "2026-04-17T15:54:14Z"
+    "updated": "2026-04-17T15:59:56Z"
   },
   "plan": {
     "title": "PROJECT-DEFINITION",
@@ -102,28 +102,6 @@
         }
       },
       {
-        "id": "2026-04-17-qr-matrix-core",
-        "title": "QR matrix core — wrap segno and expose a binary matrix",
-        "status": "proposed",
-        "metadata": {
-          "source_path": "proposed/2026-04-17-qr-matrix-core.vbrief.json",
-          "lifecycle_folder": "proposed",
-          "references": [
-            {
-              "type": "x-vbrief/context",
-              "uri": "./specification.vbrief.json",
-              "url": "./specification.vbrief.json",
-              "id": "qr2stl-specification",
-              "description": "Parent specification"
-            },
-            {
-              "type": "user-request",
-              "id": "spec-interview-2026-04-17"
-            }
-          ]
-        }
-      },
-      {
         "id": "2026-04-17-stl-writer",
         "title": "STL writer — merge base + pixels, emit single-color binary STL",
         "status": "proposed",
@@ -186,6 +164,28 @@
               "type": "user-request",
               "id": "spec-interview-2026-04-17",
               "description": "Greenfield spec interview — STL QR Code Generator"
+            }
+          ]
+        }
+      },
+      {
+        "id": "2026-04-17-qr-matrix-core",
+        "title": "QR matrix core — wrap segno and expose a binary matrix",
+        "status": "running",
+        "metadata": {
+          "source_path": "active/2026-04-17-qr-matrix-core.vbrief.json",
+          "lifecycle_folder": "active",
+          "references": [
+            {
+              "type": "x-vbrief/context",
+              "uri": "./specification.vbrief.json",
+              "url": "./specification.vbrief.json",
+              "id": "qr2stl-specification",
+              "description": "Parent specification"
+            },
+            {
+              "type": "user-request",
+              "id": "spec-interview-2026-04-17"
             }
           ]
         }
