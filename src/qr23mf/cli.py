@@ -1,28 +1,36 @@
-"""Typer CLI skeleton for qr23mf.
+"""Typer CLI for qr23mf.
 
-Bootstrap scope (see ``vbrief/active/2026-04-17-bootstrap-python-skeleton.vbrief.json``)
-only wires up ``--help`` and ``--version``. The real ``generate`` command lands in
-the ``typer-cli`` scope once the geometry/writer scopes are implemented.
+Wires the ``qr``, ``geometry``, and ``writers.stl`` layers into a user-facing
+command surface. The ``generate`` subcommand exposes the full in-memory
+pipeline (text -> QrMatrix -> base + pixels meshes) and optionally writes a
+single-body STL to disk. 3MF output and two-color support land with the
+``3mf-writer`` and ``typer-cli`` scopes.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from qr23mf import __version__
+from qr23mf.geometry import GeometryParams, build_meshes
+from qr23mf.qr import EcLevel, build_matrix
+from qr23mf.writers.stl import write_stl
 
 app = typer.Typer(
     name="qr23mf",
     help=(
-        "Turn a string or URL into a 3D-printable QR code mesh (single-color STL "
-        "or two-color 3MF). This command surface is currently a skeleton; run "
-        "`qr23mf --help` to see available options."
+        "Turn a string or URL into a 3D-printable QR code mesh. Run "
+        "`qr23mf generate --help` for the end-to-end command, or `qr23mf "
+        "--help` to see top-level options."
     ),
     no_args_is_help=True,
     add_completion=True,
 )
+
+_EC_CHOICES = ("L", "M", "Q", "H")
 
 
 def _version_callback(value: bool) -> None:
@@ -46,12 +54,121 @@ def main(
 ) -> None:
     """qr23mf root command.
 
-    Subcommands land here as later scopes ship. At the moment the command is a
-    placeholder and exits via ``no_args_is_help`` when invoked without options.
+    Subcommands expose the individual pipeline stages. Without arguments the
+    full ``--help`` output is printed (typer's ``no_args_is_help`` behavior).
     """
     # typer's `is_eager` version callback exits before we get here; the unused
     # `version` parameter satisfies strict typing without enabling behavior.
     del version
+
+
+def _print_summary(
+    text: str, ec: EcLevel, params: GeometryParams, base_triangles: int, pixel_triangles: int
+) -> None:
+    """Print a human-readable summary of the generated meshes."""
+    n_pixels = pixel_triangles // 12
+    typer.echo("Generated QR mesh:")
+    typer.echo(f"  text              {text!r}")
+    typer.echo(f"  error correction  {ec}")
+    typer.echo(f"  size              {params.size_mm:g} mm x {params.size_mm:g} mm")
+    typer.echo(f"  base height       {params.base_height_mm:g} mm")
+    typer.echo(f"  pixel height      {params.pixel_height_mm:g} mm")
+    typer.echo(f"  quiet zone        {params.quiet_zone_modules} modules")
+    typer.echo(f"  base triangles    {base_triangles}")
+    typer.echo(f"  pixel boxes       {n_pixels}")
+    typer.echo(f"  pixel triangles   {pixel_triangles}")
+    typer.echo(f"  total triangles   {base_triangles + pixel_triangles}")
+
+
+@app.command()
+def generate(
+    text: Annotated[
+        str,
+        typer.Option(
+            "--text",
+            "-t",
+            help="Payload to encode (string or URL). Must be non-empty.",
+        ),
+    ],
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Optional output path. If given, a single-body binary STL is written.",
+        ),
+    ] = None,
+    size_mm: Annotated[
+        float,
+        typer.Option("--size", help="Base plate side length in millimeters."),
+    ] = 60.0,
+    base_height_mm: Annotated[
+        float,
+        typer.Option("--base-height", help="Base plate thickness in millimeters."),
+    ] = 2.0,
+    pixel_height_mm: Annotated[
+        float,
+        typer.Option("--pixel-height", help="Extrusion height of dark modules above the base."),
+    ] = 1.0,
+    ec: Annotated[
+        str,
+        typer.Option(
+            "--ec",
+            help="QR error-correction level. One of L, M, Q, H.",
+        ),
+    ] = "M",
+    quiet_zone_modules: Annotated[
+        int,
+        typer.Option(
+            "--quiet-zone",
+            help="Quiet-zone margin in module units (QR spec recommends 4).",
+        ),
+    ] = 4,
+) -> None:
+    """Build a QR mesh from ``--text`` and print its geometry summary.
+
+    Passing ``--out path.stl`` additionally writes a single-body binary STL
+    that can be loaded directly into any slicer. Two-color 3MF output arrives
+    with the ``3mf-writer`` scope.
+    """
+    ec_upper = ec.upper()
+    if ec_upper not in _EC_CHOICES:
+        typer.secho(
+            f"Error: --ec must be one of {', '.join(_EC_CHOICES)} (got {ec!r}).",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        matrix = build_matrix(text, ec=ec_upper)  # type: ignore[arg-type]
+        params = GeometryParams(
+            size_mm=size_mm,
+            base_height_mm=base_height_mm,
+            pixel_height_mm=pixel_height_mm,
+            quiet_zone_modules=quiet_zone_modules,
+        )
+        base, pixels = build_meshes(matrix, params)
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    _print_summary(
+        text=text,
+        ec=ec_upper,  # type: ignore[arg-type]
+        params=params,
+        base_triangles=base.vectors.shape[0],
+        pixel_triangles=pixels.vectors.shape[0],
+    )
+
+    if out is not None:
+        out_path = out if out.suffix else out.with_suffix(".stl")
+        try:
+            write_stl(base, pixels, out_path)
+        except OSError as exc:
+            typer.secho(f"Error writing {out_path}: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=3) from exc
+        typer.echo(f"Wrote {out_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover - manual invocation only
