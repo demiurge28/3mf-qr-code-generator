@@ -2,7 +2,7 @@
   "vBRIEFInfo": {
     "version": "0.5",
     "description": "Project definition -- synthesized gestalt of the project.",
-    "updated": "2026-04-17T16:05:57Z"
+    "updated": "2026-04-17T16:18:31Z"
   },
   "plan": {
     "title": "PROJECT-DEFINITION",
@@ -41,28 +41,6 @@
         "status": "proposed",
         "metadata": {
           "source_path": "proposed/2026-04-17-docs-and-readme.vbrief.json",
-          "lifecycle_folder": "proposed",
-          "references": [
-            {
-              "type": "x-vbrief/context",
-              "uri": "./specification.vbrief.json",
-              "url": "./specification.vbrief.json",
-              "id": "qr23mf-specification",
-              "description": "Parent specification"
-            },
-            {
-              "type": "user-request",
-              "id": "spec-interview-2026-04-17"
-            }
-          ]
-        }
-      },
-      {
-        "id": "2026-04-17-geometry-builder",
-        "title": "Geometry builder — matrix + params to base and pixel meshes",
-        "status": "proposed",
-        "metadata": {
-          "source_path": "proposed/2026-04-17-geometry-builder.vbrief.json",
           "lifecycle_folder": "proposed",
           "references": [
             {
@@ -164,6 +142,28 @@
               "type": "user-request",
               "id": "spec-interview-2026-04-17",
               "description": "Greenfield spec interview — 3mf QR Code Generator"
+            }
+          ]
+        }
+      },
+      {
+        "id": "2026-04-17-geometry-builder",
+        "title": "Geometry builder — matrix + params to base and pixel meshes",
+        "status": "running",
+        "metadata": {
+          "source_path": "active/2026-04-17-geometry-builder.vbrief.json",
+          "lifecycle_folder": "active",
+          "references": [
+            {
+              "type": "x-vbrief/context",
+              "uri": "./specification.vbrief.json",
+              "url": "./specification.vbrief.json",
+              "id": "qr23mf-specification",
+              "description": "Parent specification"
+            },
+            {
+              "type": "user-request",
+              "id": "spec-interview-2026-04-17"
             }
           ]
         }
