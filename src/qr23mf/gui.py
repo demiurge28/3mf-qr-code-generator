@@ -66,11 +66,13 @@ _QR_SELECTED_OUTLINE: str = "#ff6600"
 _QR_NUDGE_MM: float = 0.5
 
 # Alignment-grid and snap constants for the interactive layout canvas.
-_GRID_SPACING_MM: float = 5.0
+_GRID_SPACING_DEFAULT_MM: int = 5
+_GRID_SPACING_MIN_MM: int = 1
+_GRID_SPACING_MAX_MM: int = 10
 _SNAP_TOLERANCE_MM: float = 1.0
 _GRID_MINOR_COLOR: str = "#ededed"
 _GRID_MAJOR_COLOR: str = "#c6c6c6"
-_GRID_MAJOR_EVERY: int = 5  # every 5 minor lines = 25 mm when step is 5 mm
+_GRID_MAJOR_EVERY: int = 5  # every Nth line is rendered heavier (major)
 _SPACING_LINE_COLOR: str = "#0047ab"
 _SPACING_TEXT_COLOR: str = "#0047ab"
 _SPACING_FONT_PX: int = 8
@@ -117,6 +119,7 @@ class _SettingsApp(ttk.Frame):
         self._grid_var = tk.BooleanVar(value=False)
         self._snap_var = tk.BooleanVar(value=False)
         self._spacing_var = tk.BooleanVar(value=False)
+        self._grid_size_var = tk.IntVar(value=_GRID_SPACING_DEFAULT_MM)
         self._build()
 
     def _build(self) -> None:
@@ -485,17 +488,38 @@ class _SettingsApp(ttk.Frame):
         options_row.pack(anchor=tk.W, pady=(6, 0))
         grid_cb = ttk.Checkbutton(
             options_row,
-            text=f"Grid ({_GRID_SPACING_MM:g} mm)",
+            text="Grid",
             variable=self._grid_var,
             command=self._redraw_layout,
         )
         grid_cb.pack(side=tk.LEFT)
         _add_tooltip(
             grid_cb,
-            f"Overlay a {_GRID_SPACING_MM:g} mm alignment grid on the plate. "
-            "Every 5th line is rendered heavier so you get 25 mm major "
-            "spacing for free.",
+            "Overlay an alignment grid on the plate. Pick the spacing in "
+            "millimetres with the spinbox on the right. Every 5th line is "
+            "rendered heavier as a 'major' gridline.",
         )
+        grid_size_spin = ttk.Spinbox(
+            options_row,
+            from_=_GRID_SPACING_MIN_MM,
+            to=_GRID_SPACING_MAX_MM,
+            increment=1,
+            width=3,
+            textvariable=self._grid_size_var,
+            command=self._redraw_layout,
+        )
+        grid_size_spin.pack(side=tk.LEFT, padx=(2, 0))
+        _add_tooltip(
+            grid_size_spin,
+            f"Grid spacing in millimetres ({_GRID_SPACING_MIN_MM}\u2013"
+            f"{_GRID_SPACING_MAX_MM} mm). Changing it immediately redraws "
+            "the overlay and updates the snap anchors.",
+        )
+        grid_unit_label = ttk.Label(options_row, text="mm")
+        grid_unit_label.pack(side=tk.LEFT, padx=(2, 8))
+        # Redraw the canvas whenever the grid-size value changes (covers
+        # typing as well as spinbox button presses).
+        self._grid_size_var.trace_add("write", self._on_layout_vars_changed)
         snap_cb = ttk.Checkbutton(
             options_row,
             text="Snap",
@@ -749,7 +773,7 @@ class _SettingsApp(ttk.Frame):
             ys.append(lab.y_mm)
 
         if self._grid_var.get():
-            step = _GRID_SPACING_MM
+            step = float(self._current_grid_step_mm())
             k_min = math.ceil(-plate_w / 2.0 / step)
             k_max = math.floor(plate_w / 2.0 / step)
             xs.extend(k * step for k in range(k_min, k_max + 1))
@@ -758,6 +782,19 @@ class _SettingsApp(ttk.Frame):
             ys.extend(k * step for k in range(k_min, k_max + 1))
 
         return xs, ys
+
+    def _current_grid_step_mm(self) -> int:
+        """Return the active grid spacing in mm, clamped to the allowed range.
+
+        Reading from :class:`tk.IntVar` can raise ``TclError`` while the user
+        is mid-edit (empty spinbox). We fall back to the default spacing so
+        the grid overlay keeps rendering smoothly.
+        """
+        try:
+            value = int(self._grid_size_var.get())
+        except (ValueError, tk.TclError):
+            return _GRID_SPACING_DEFAULT_MM
+        return max(_GRID_SPACING_MIN_MM, min(_GRID_SPACING_MAX_MM, value))
 
     def _draw_grid_overlay(
         self,
@@ -772,7 +809,7 @@ class _SettingsApp(ttk.Frame):
         Every ``_GRID_MAJOR_EVERY``-th line uses the heavier major color
         (e.g. 25 mm increments for a 5 mm grid).
         """
-        step = _GRID_SPACING_MM
+        step = float(self._current_grid_step_mm())
         k_min = math.ceil(-plate_w / 2.0 / step)
         k_max = math.floor(plate_w / 2.0 / step)
         for k in range(k_min, k_max + 1):
@@ -1466,16 +1503,31 @@ def _grid_row(
 
 
 class _Tooltip:
-    """Lightweight hover tooltip for Tk widgets.
+    """Lightweight hover tooltip with a rounded 'pill' background.
 
-    Shows a small borderless ``Toplevel`` with wrapped text when the mouse
-    enters the associated widget and hides it on mouse leave or when the
-    widget is destroyed. Designed to be attached once per widget via
-    :func:`_add_tooltip`; repeated calls replace the tooltip text in place.
+    Shows a small borderless ``Toplevel`` whose interior is a
+    :class:`tk.Canvas` on which a smoothed rounded rectangle
+    (corner radius = half the tooltip height, i.e. pill-shaped with
+    semi-circular ends) is drawn and the tooltip text is rendered inside.
+    On macOS the ``-transparent`` window attribute is enabled and the
+    canvas background is set to ``systemTransparent`` so the corners
+    outside the rounded shape are genuinely see-through. On other
+    platforms where transparency isn't available the canvas falls back to
+    a solid pale-yellow background which still reads clearly as a
+    pill-shaped tooltip.
+
+    The popup is shown after :data:`_SHOW_DELAY_MS` on ``<Enter>`` and
+    hidden on ``<Leave>`` / ``<ButtonPress>`` / ``<Destroy>``.
     """
 
     _SHOW_DELAY_MS: int = 350
     _WRAP_PX: int = 320
+    _PAD_X: int = 14
+    _PAD_Y: int = 8
+    _FONT: tuple[str, int] = ("TkDefaultFont", 10)
+    _FILL: str = "#ffffe0"
+    _OUTLINE: str = "#808080"
+    _TEXT_FG: str = "#222"
 
     def __init__(self, widget: tk.Widget, text: str) -> None:
         self.widget = widget
@@ -1511,21 +1563,101 @@ class _Tooltip:
             y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
         except tk.TclError:
             return
+
         tip = tk.Toplevel(self.widget)
         tip.wm_overrideredirect(True)
-        tip.wm_geometry(f"+{int(x)}+{int(y)}")
-        tk.Label(
+        # Ask the window manager for a truly transparent Toplevel so the
+        # corners outside the pill are see-through. macOS honors this via
+        # '-transparent'; other platforms silently ignore it.
+        with contextlib.suppress(tk.TclError):
+            tip.wm_attributes("-transparent", True)
+
+        # Measure the wrapped text using a throw-away Label so the canvas
+        # can be sized exactly to the pill's footprint.
+        measure = tk.Label(tip, text=self.text, font=self._FONT, wraplength=self._WRAP_PX)
+        measure.update_idletasks()
+        text_w = max(1, int(measure.winfo_reqwidth()))
+        text_h = max(1, int(measure.winfo_reqheight()))
+        measure.destroy()
+
+        canvas_w = text_w + 2 * self._PAD_X
+        canvas_h = text_h + 2 * self._PAD_Y
+        # Pill shape: corner radius == half the shorter side so the ends
+        # are perfect semicircles (matches the example mockup).
+        radius = canvas_h / 2.0
+
+        # Attempt a transparent canvas background on platforms that
+        # support the 'systemTransparent' color (macOS). On everything
+        # else fall back to the pill fill, which still renders as a
+        # solid rounded rectangle.
+        canvas_bg = self._FILL
+        try:
+            # Probe whether systemTransparent is a valid color in this Tk
+            # build by trying to apply it; roll back on TclError.
+            probe = tk.Canvas(tip, bg="systemTransparent")
+            probe.destroy()
+            canvas_bg = "systemTransparent"
+        except tk.TclError:
+            pass
+
+        canvas = tk.Canvas(
             tip,
+            width=canvas_w,
+            height=canvas_h,
+            bg=canvas_bg,
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        canvas.pack()
+
+        # Rounded rectangle via a smoothed 12-point polygon. The point
+        # sequence walks each corner twice so Tk's Bezier smoother
+        # produces a clean curve with no straight-line edges at the corners.
+        points = [
+            radius,
+            0.0,
+            canvas_w - radius,
+            0.0,
+            canvas_w,
+            0.0,
+            canvas_w,
+            radius,
+            canvas_w,
+            canvas_h - radius,
+            canvas_w,
+            canvas_h,
+            canvas_w - radius,
+            canvas_h,
+            radius,
+            canvas_h,
+            0.0,
+            canvas_h,
+            0.0,
+            canvas_h - radius,
+            0.0,
+            radius,
+            0.0,
+            0.0,
+        ]
+        canvas.create_polygon(
+            points,
+            smooth=True,
+            splinesteps=36,
+            fill=self._FILL,
+            outline=self._OUTLINE,
+            width=1,
+        )
+        canvas.create_text(
+            canvas_w / 2.0,
+            canvas_h / 2.0,
             text=self.text,
+            font=self._FONT,
+            fill=self._TEXT_FG,
+            width=self._WRAP_PX,
             justify=tk.LEFT,
-            background="#ffffe0",
-            foreground="#222",
-            relief=tk.SOLID,
-            borderwidth=1,
-            wraplength=self._WRAP_PX,
-            padx=6,
-            pady=3,
-        ).pack()
+        )
+
+        tip.wm_geometry(f"+{int(x)}+{int(y)}")
         self._tip = tip
 
     def _hide(self) -> None:
