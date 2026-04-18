@@ -18,6 +18,7 @@ by default; ``brew install python-tk@3.11`` provides it).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import tkinter as tk
@@ -122,76 +123,216 @@ class _SettingsApp(ttk.Frame):
         # --- Payload + EC ----------------------------------------------------
         text_row = ttk.Frame(self)
         text_row.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(text_row, text="Payload text:").pack(side=tk.LEFT, padx=(0, 6))
+        payload_label = ttk.Label(text_row, text="Payload text:")
+        payload_label.pack(side=tk.LEFT, padx=(0, 6))
         self._text_var = tk.StringVar(value="https://example.com")
-        ttk.Entry(text_row, textvariable=self._text_var, width=36).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        payload_entry = ttk.Entry(text_row, textvariable=self._text_var, width=36)
+        payload_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        _add_tooltip(
+            payload_label,
+            "The string or URL the QR code will encode. Must be non-empty. "
+            "Longer payloads push the QR to a higher version (more modules).",
         )
-        ttk.Label(text_row, text="EC:").pack(side=tk.LEFT, padx=(12, 4))
+        _add_tooltip(
+            payload_entry,
+            "The string or URL the QR code will encode. Must be non-empty. "
+            "Longer payloads push the QR to a higher version (more modules).",
+        )
+        ec_label = ttk.Label(text_row, text="EC:")
+        ec_label.pack(side=tk.LEFT, padx=(12, 4))
         self._ec_var = tk.StringVar(value="M")
-        ttk.Combobox(
+        ec_combo = ttk.Combobox(
             text_row,
             textvariable=self._ec_var,
             width=4,
             values=["L", "M", "Q", "H"],
             state="readonly",
-        ).pack(side=tk.LEFT)
+        )
+        ec_combo.pack(side=tk.LEFT)
+        _add_tooltip(
+            ec_label,
+            "Error-correction level. L \u224807%, M \u224815%, Q \u224825%, "
+            "H \u224830% damage tolerance. Higher = more resilient to scratches "
+            "or poor contrast, but requires more modules for the same payload.",
+        )
+        _add_tooltip(
+            ec_combo,
+            "Error-correction level. L \u224807%, M \u224815%, Q \u224825%, "
+            "H \u224830% damage tolerance. Higher = more resilient to scratches "
+            "or poor contrast, but requires more modules for the same payload.",
+        )
 
         # --- 3D object (plate) ----------------------------------------------
         plate = ttk.LabelFrame(self, text="3D object (base plate)")
         plate.pack(fill=tk.X, pady=6)
-        self._plate_w = _add_float_spinbox(plate, "Width (mm):", 60.0, 5.0, 500.0, 0.5)
-        self._plate_d = _add_float_spinbox(plate, "Depth (mm):", 60.0, 5.0, 500.0, 0.5)
-        self._plate_h = _add_float_spinbox(plate, "Thickness (mm):", 2.0, 0.2, 20.0, 0.1)
+        self._plate_w = _add_float_spinbox(
+            plate,
+            "Width (mm):",
+            60.0,
+            5.0,
+            500.0,
+            0.5,
+            tooltip="Plate extent along X, in millimetres. Must fit the QR "
+            "footprint plus quiet zone.",
+        )
+        self._plate_d = _add_float_spinbox(
+            plate,
+            "Depth (mm):",
+            60.0,
+            5.0,
+            500.0,
+            0.5,
+            tooltip="Plate extent along Y, in millimetres. Set equal to "
+            "Width for a square plate, or make it larger for a rectangular one.",
+        )
+        self._plate_h = _add_float_spinbox(
+            plate,
+            "Thickness (mm):",
+            2.0,
+            0.2,
+            20.0,
+            0.1,
+            tooltip="Plate thickness along Z, in millimetres. For Flush or "
+            "Sunken finishes the pixel / text extrusion must be less than "
+            "this.",
+        )
 
         # --- QR code --------------------------------------------------------
         qr = ttk.LabelFrame(self, text="QR code")
         qr.pack(fill=tk.X, pady=6)
-        self._qr_size = _add_float_spinbox(qr, "Size (mm, 0 = fill):", 50.0, 0.0, 500.0, 0.5)
-        self._qr_x = _add_float_spinbox(qr, "X offset (mm):", 0.0, -250.0, 250.0, 0.5)
-        self._qr_y = _add_float_spinbox(qr, "Y offset (mm):", 0.0, -250.0, 250.0, 0.5)
-        self._pixel_h = _add_float_spinbox(qr, "Module extrusion (mm):", 1.0, 0.1, 10.0, 0.1)
-        self._quiet = _add_int_spinbox(qr, "Quiet zone (modules):", 4, 0, 20)
+        self._qr_size = _add_float_spinbox(
+            qr,
+            "Size (mm, 0 = fill):",
+            50.0,
+            0.0,
+            500.0,
+            0.5,
+            tooltip="Edge length of the QR code including its quiet zone. "
+            "Set to 0 to auto-fit the largest square that fits the plate.",
+        )
+        self._qr_x = _add_float_spinbox(
+            qr,
+            "X offset (mm):",
+            0.0,
+            -250.0,
+            250.0,
+            0.5,
+            tooltip="Horizontal position of the QR center, relative to the "
+            "plate center. Positive = right, negative = left.",
+        )
+        self._qr_y = _add_float_spinbox(
+            qr,
+            "Y offset (mm):",
+            0.0,
+            -250.0,
+            250.0,
+            0.5,
+            tooltip="Vertical position of the QR center, relative to the "
+            "plate center. Positive = up (+Y), negative = down (\u2212Y).",
+        )
+        self._pixel_h = _add_float_spinbox(
+            qr,
+            "Module extrusion (mm):",
+            1.0,
+            0.1,
+            10.0,
+            0.1,
+            tooltip="Height of each dark QR module above the plate (Extruded "
+            "finish) or depth into the plate's top slab (Flush / Sunken).",
+        )
+        self._quiet = _add_int_spinbox(
+            qr,
+            "Quiet zone (modules):",
+            4,
+            0,
+            20,
+            tooltip="Blank margin around the QR code, measured in module units. "
+            "The QR specification recommends 4; smaller values save space but "
+            "can make scanning less reliable.",
+        )
 
         style_row = ttk.Frame(qr)
         style_row.pack(fill=tk.X, padx=6, pady=3)
-        ttk.Label(style_row, text="Module style:").pack(side=tk.LEFT)
+        style_label = ttk.Label(style_row, text="Module style:")
+        style_label.pack(side=tk.LEFT)
         self._style_var = tk.StringVar(value="square")
-        ttk.Radiobutton(
+        style_squares_rb = ttk.Radiobutton(
             style_row,
             text="Squares",
             variable=self._style_var,
             value="square",
-        ).pack(side=tk.LEFT, padx=(8, 6))
-        ttk.Radiobutton(
+        )
+        style_squares_rb.pack(side=tk.LEFT, padx=(8, 6))
+        style_dots_rb = ttk.Radiobutton(
             style_row,
             text="Dots",
             variable=self._style_var,
             value="dot",
-        ).pack(side=tk.LEFT)
+        )
+        style_dots_rb.pack(side=tk.LEFT)
+        _add_tooltip(
+            style_label,
+            "How each dark QR module is drawn: axis-aligned squares or cylindrical dots.",
+        )
+        _add_tooltip(
+            style_squares_rb,
+            "Each dark module is an axis-aligned box \u2014 crisp, classic "
+            "QR look, prints fastest.",
+        )
+        _add_tooltip(
+            style_dots_rb,
+            "Each dark module is a cylindrical 16-gon prism. Rounder and "
+            "more decorative, with slightly higher triangle count.",
+        )
 
         finish_row = ttk.Frame(qr)
         finish_row.pack(fill=tk.X, padx=6, pady=3)
-        ttk.Label(finish_row, text="Finish:").pack(side=tk.LEFT)
+        finish_label = ttk.Label(finish_row, text="Finish:")
+        finish_label.pack(side=tk.LEFT)
         self._finish_var = tk.StringVar(value="extruded")
-        ttk.Radiobutton(
+        finish_extruded_rb = ttk.Radiobutton(
             finish_row,
             text="Extruded",
             variable=self._finish_var,
             value="extruded",
-        ).pack(side=tk.LEFT, padx=(8, 6))
-        ttk.Radiobutton(
+        )
+        finish_extruded_rb.pack(side=tk.LEFT, padx=(8, 6))
+        finish_flush_rb = ttk.Radiobutton(
             finish_row,
             text="Flush",
             variable=self._finish_var,
             value="flush",
-        ).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Radiobutton(
+        )
+        finish_flush_rb.pack(side=tk.LEFT, padx=(0, 6))
+        finish_sunken_rb = ttk.Radiobutton(
             finish_row,
             text="Sunken",
             variable=self._finish_var,
             value="sunken",
-        ).pack(side=tk.LEFT)
+        )
+        finish_sunken_rb.pack(side=tk.LEFT)
+        _add_tooltip(
+            finish_label,
+            "How the QR code (and text labels) sit in the plate. Text labels "
+            "mirror this selection.",
+        )
+        _add_tooltip(
+            finish_extruded_rb,
+            "Features rise above the plate (tactile). Best for single-filament "
+            "prints that scan well.",
+        )
+        _add_tooltip(
+            finish_flush_rb,
+            "Features live inside the plate's top slab; the plate is still a "
+            "solid box. Ideal for two-color prints where the QR is a flat "
+            "color change on the top surface.",
+        )
+        _add_tooltip(
+            finish_sunken_rb,
+            "Features live inside the plate's top slab AND the base has "
+            "matching pockets carved out, so the QR is visibly recessed even "
+            "in a single-color print.",
+        )
 
         # --- Text labels (form on the left, interactive canvas on the right)
         labels_frame = ttk.LabelFrame(
@@ -214,6 +355,11 @@ class _SettingsApp(ttk.Frame):
         self._labels_list = tk.Listbox(left_panel, height=4, exportselection=False)
         self._labels_list.pack(fill=tk.X)
         self._labels_list.bind("<<ListboxSelect>>", self._on_label_selected)
+        _add_tooltip(
+            self._labels_list,
+            "All text labels currently on the plate. Click one to load its "
+            "values into the form below and highlight it on the canvas.",
+        )
 
         form = ttk.Frame(left_panel)
         form.pack(fill=tk.X, pady=(6, 0))
@@ -224,7 +370,15 @@ class _SettingsApp(ttk.Frame):
         self._label_h = tk.DoubleVar(value=5.0)
         self._label_ext = tk.DoubleVar(value=1.0)
 
-        _grid_row(form, 0, "Text:", ttk.Entry(form, textvariable=self._label_text, width=28))
+        _grid_row(
+            form,
+            0,
+            "Text:",
+            ttk.Entry(form, textvariable=self._label_text, width=28),
+            tooltip="The characters to extrude on the plate. Rasterized with "
+            "Pillow's default font; longer text uses smaller per-character "
+            "cells.",
+        )
         _grid_row(
             form,
             1,
@@ -232,6 +386,8 @@ class _SettingsApp(ttk.Frame):
             ttk.Spinbox(
                 form, textvariable=self._label_x, from_=-250, to=250, increment=0.5, width=8
             ),
+            tooltip="Horizontal position of the label center, relative to "
+            "the plate center (positive = right).",
         )
         _grid_row(
             form,
@@ -240,6 +396,8 @@ class _SettingsApp(ttk.Frame):
             ttk.Spinbox(
                 form, textvariable=self._label_y, from_=-250, to=250, increment=0.5, width=8
             ),
+            tooltip="Vertical position of the label center, relative to the "
+            "plate center (positive = up / +Y).",
         )
         _grid_row(
             form,
@@ -248,6 +406,9 @@ class _SettingsApp(ttk.Frame):
             ttk.Spinbox(
                 form, textvariable=self._label_h, from_=1.0, to=100.0, increment=0.5, width=8
             ),
+            tooltip="Cap height of the rendered text in millimetres. Taller "
+            "labels produce larger raster cells which slicers can print more "
+            "cleanly.",
         )
         _grid_row(
             form,
@@ -256,19 +417,39 @@ class _SettingsApp(ttk.Frame):
             ttk.Spinbox(
                 form, textvariable=self._label_ext, from_=0.1, to=10.0, increment=0.1, width=8
             ),
+            tooltip="How far the text rises above the plate (Extruded finish) "
+            "or sinks into its top slab (Flush / Sunken). For Flush / Sunken "
+            "this must be less than Thickness (mm).",
         )
 
         buttons = ttk.Frame(left_panel)
         buttons.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(buttons, text="Add label", command=self._add_label).pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Update selected", command=self._update_label).pack(
-            side=tk.LEFT, padx=(6, 0)
+        add_btn = ttk.Button(buttons, text="Add label", command=self._add_label)
+        add_btn.pack(side=tk.LEFT)
+        _add_tooltip(
+            add_btn,
+            'Add a new text label using the form values. You can also "add" '
+            "by left-clicking on an empty area of the plate canvas.",
         )
-        ttk.Button(buttons, text="Remove selected", command=self._remove_label).pack(
-            side=tk.LEFT, padx=(6, 0)
+        update_btn = ttk.Button(buttons, text="Update selected", command=self._update_label)
+        update_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _add_tooltip(
+            update_btn,
+            "Replace the selected label (highlighted in the list above) with "
+            "the form values. Select a label first.",
         )
-        ttk.Button(buttons, text="Remove all", command=self._remove_all_labels).pack(
-            side=tk.LEFT, padx=(6, 0)
+        remove_btn = ttk.Button(buttons, text="Remove selected", command=self._remove_label)
+        remove_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _add_tooltip(
+            remove_btn,
+            "Delete the selected label. You can also remove by right-clicking "
+            "(Ctrl+Click on macOS) it on the plate canvas.",
+        )
+        remove_all_btn = ttk.Button(buttons, text="Remove all", command=self._remove_all_labels)
+        remove_all_btn.pack(side=tk.LEFT, padx=(6, 0))
+        _add_tooltip(
+            remove_all_btn,
+            "Delete every text label on the plate, after a confirmation prompt.",
         )
 
         # Right panel: interactive layout canvas + usage hint.
@@ -281,6 +462,13 @@ class _SettingsApp(ttk.Frame):
             highlightbackground="#ccc",
         )
         self._layout_canvas.pack()
+        _add_tooltip(
+            self._layout_canvas,
+            "Live top-down plate preview. Left-click empty plate = add a "
+            "label. Drag a label = move it. Right-click a label = remove. "
+            "Click the QR footprint to select it, then use \u2190\u2192\u2191"
+            "\u2193 to nudge in 0.5 mm steps.",
+        )
         ttk.Label(
             right_panel,
             text=(
@@ -295,23 +483,44 @@ class _SettingsApp(ttk.Frame):
         # Layout options: grid overlay, snap-to-align, spacing display.
         options_row = ttk.Frame(right_panel)
         options_row.pack(anchor=tk.W, pady=(6, 0))
-        ttk.Checkbutton(
+        grid_cb = ttk.Checkbutton(
             options_row,
             text=f"Grid ({_GRID_SPACING_MM:g} mm)",
             variable=self._grid_var,
             command=self._redraw_layout,
-        ).pack(side=tk.LEFT)
-        ttk.Checkbutton(
+        )
+        grid_cb.pack(side=tk.LEFT)
+        _add_tooltip(
+            grid_cb,
+            f"Overlay a {_GRID_SPACING_MM:g} mm alignment grid on the plate. "
+            "Every 5th line is rendered heavier so you get 25 mm major "
+            "spacing for free.",
+        )
+        snap_cb = ttk.Checkbutton(
             options_row,
             text="Snap",
             variable=self._snap_var,
-        ).pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Checkbutton(
+        )
+        snap_cb.pack(side=tk.LEFT, padx=(8, 0))
+        _add_tooltip(
+            snap_cb,
+            "Snap label drags and click-to-add to the nearest anchor within "
+            "1 mm. Anchors: plate center + edges, QR center + edges, other "
+            "labels, and grid lines when Grid is on.",
+        )
+        spacing_cb = ttk.Checkbutton(
             options_row,
             text="Show spacing",
             variable=self._spacing_var,
             command=self._redraw_layout,
-        ).pack(side=tk.LEFT, padx=(8, 0))
+        )
+        spacing_cb.pack(side=tk.LEFT, padx=(8, 0))
+        _add_tooltip(
+            spacing_cb,
+            "For the currently selected label, draw dashed callouts with mm "
+            "distances to each plate edge and (when non-overlapping) to the "
+            "nearest QR edge in X / Y.",
+        )
 
         self._layout_canvas.bind("<Button-1>", self._on_canvas_press)
         self._layout_canvas.bind("<B1-Motion>", self._on_canvas_drag)
@@ -337,12 +546,26 @@ class _SettingsApp(ttk.Frame):
         footer.pack(fill=tk.X, pady=(12, 0))
         self._status_var = tk.StringVar(value="Ready.")
         ttk.Label(footer, textvariable=self._status_var).pack(side=tk.LEFT)
-        ttk.Button(footer, text="Preview", command=self._on_preview).pack(side=tk.RIGHT)
-        ttk.Button(
+        preview_btn = ttk.Button(footer, text="Preview", command=self._on_preview)
+        preview_btn.pack(side=tk.RIGHT)
+        _add_tooltip(
+            preview_btn,
+            "Build the full mesh with the current settings and open a 2D "
+            "top-down preview window. From there you can save the design as "
+            "a two-object 3MF.",
+        )
+        updates_btn = ttk.Button(
             footer,
             text="Check for updates",
             command=self._check_for_updates,
-        ).pack(side=tk.RIGHT, padx=(0, 6))
+        )
+        updates_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        _add_tooltip(
+            updates_btn,
+            "Query GitHub for a newer qr23mf release (5 s timeout, no login "
+            'required). Shows "No New Updates" when current, or offers to '
+            "open the Releases page in your browser.",
+        )
 
     # --- Label list handlers -------------------------------------------------
 
@@ -1030,6 +1253,12 @@ class _PreviewWindow(tk.Toplevel):
             highlightbackground="#ccc",
         )
         self._canvas.pack(padx=12, pady=12)
+        _add_tooltip(
+            self._canvas,
+            "Scaled top-down preview of the plate, QR modules and text "
+            "labels exactly as they will be written to the 3MF. Close this "
+            "window to go back and edit settings.",
+        )
 
         summary = (
             f"Plate: {params.size_mm:g} x {params.effective_depth_mm:g} x "
@@ -1052,8 +1281,20 @@ class _PreviewWindow(tk.Toplevel):
 
         buttons = ttk.Frame(self)
         buttons.pack(fill=tk.X, padx=12, pady=(6, 12))
-        ttk.Button(buttons, text="Back", command=self.destroy).pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Create\u2026", command=self._on_create).pack(side=tk.RIGHT)
+        back_btn = ttk.Button(buttons, text="Back", command=self.destroy)
+        back_btn.pack(side=tk.LEFT)
+        _add_tooltip(
+            back_btn,
+            "Close this preview and return to the settings window to tweak the design.",
+        )
+        create_btn = ttk.Button(buttons, text="Create\u2026", command=self._on_create)
+        create_btn.pack(side=tk.RIGHT)
+        _add_tooltip(
+            create_btn,
+            "Open a save dialog and write a two-object 3MF (base + features). "
+            "Slicers load the two objects as independently selectable bodies "
+            "so you can assign a different filament to each.",
+        )
 
         self._draw_preview()
         self.transient(parent.winfo_toplevel())
@@ -1154,19 +1395,25 @@ def _add_float_spinbox(
     min_val: float,
     max_val: float,
     step: float,
+    tooltip: str | None = None,
 ) -> tk.DoubleVar:
     row = ttk.Frame(parent)
     row.pack(fill=tk.X, padx=6, pady=2)
-    ttk.Label(row, text=label, width=24, anchor=tk.W).pack(side=tk.LEFT)
+    label_widget = ttk.Label(row, text=label, width=24, anchor=tk.W)
+    label_widget.pack(side=tk.LEFT)
     var = tk.DoubleVar(value=initial)
-    ttk.Spinbox(
+    spin = ttk.Spinbox(
         row,
         textvariable=var,
         from_=min_val,
         to=max_val,
         increment=step,
         width=10,
-    ).pack(side=tk.LEFT)
+    )
+    spin.pack(side=tk.LEFT)
+    if tooltip:
+        _add_tooltip(label_widget, tooltip)
+        _add_tooltip(spin, tooltip)
     return var
 
 
@@ -1176,25 +1423,132 @@ def _add_int_spinbox(
     initial: int,
     min_val: int,
     max_val: int,
+    tooltip: str | None = None,
 ) -> tk.IntVar:
     row = ttk.Frame(parent)
     row.pack(fill=tk.X, padx=6, pady=2)
-    ttk.Label(row, text=label, width=24, anchor=tk.W).pack(side=tk.LEFT)
+    label_widget = ttk.Label(row, text=label, width=24, anchor=tk.W)
+    label_widget.pack(side=tk.LEFT)
     var = tk.IntVar(value=initial)
-    ttk.Spinbox(
+    spin = ttk.Spinbox(
         row,
         textvariable=var,
         from_=min_val,
         to=max_val,
         increment=1,
         width=10,
-    ).pack(side=tk.LEFT)
+    )
+    spin.pack(side=tk.LEFT)
+    if tooltip:
+        _add_tooltip(label_widget, tooltip)
+        _add_tooltip(spin, tooltip)
     return var
 
 
-def _grid_row(parent: tk.Misc, row: int, label: str, widget: tk.Widget) -> None:
-    ttk.Label(parent, text=label).grid(row=row, column=0, sticky=tk.W, padx=(0, 6), pady=2)
+def _grid_row(
+    parent: tk.Misc,
+    row: int,
+    label: str,
+    widget: tk.Widget,
+    tooltip: str | None = None,
+) -> None:
+    label_widget = ttk.Label(parent, text=label)
+    label_widget.grid(row=row, column=0, sticky=tk.W, padx=(0, 6), pady=2)
     widget.grid(row=row, column=1, sticky=tk.W, pady=2)
+    if tooltip:
+        _add_tooltip(label_widget, tooltip)
+        _add_tooltip(widget, tooltip)
+
+
+# ---------------------------------------------------------------------------
+# Tooltip helper
+# ---------------------------------------------------------------------------
+
+
+class _Tooltip:
+    """Lightweight hover tooltip for Tk widgets.
+
+    Shows a small borderless ``Toplevel`` with wrapped text when the mouse
+    enters the associated widget and hides it on mouse leave or when the
+    widget is destroyed. Designed to be attached once per widget via
+    :func:`_add_tooltip`; repeated calls replace the tooltip text in place.
+    """
+
+    _SHOW_DELAY_MS: int = 350
+    _WRAP_PX: int = 320
+
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self._tip: tk.Toplevel | None = None
+        self._after_id: str | None = None
+        widget.bind("<Enter>", self._on_enter, add="+")
+        widget.bind("<Leave>", self._on_leave, add="+")
+        widget.bind("<ButtonPress>", self._on_leave, add="+")
+        widget.bind("<Destroy>", self._on_leave, add="+")
+
+    # --- Lifecycle ----------------------------------------------------------
+
+    def _on_enter(self, _event: object) -> None:
+        self._cancel_after()
+        self._after_id = self.widget.after(self._SHOW_DELAY_MS, self._show)
+
+    def _on_leave(self, _event: object) -> None:
+        self._cancel_after()
+        self._hide()
+
+    def _cancel_after(self) -> None:
+        if self._after_id is not None:
+            with contextlib.suppress(tk.TclError):
+                self.widget.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _show(self) -> None:
+        if self._tip is not None:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 16
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        except tk.TclError:
+            return
+        tip = tk.Toplevel(self.widget)
+        tip.wm_overrideredirect(True)
+        tip.wm_geometry(f"+{int(x)}+{int(y)}")
+        tk.Label(
+            tip,
+            text=self.text,
+            justify=tk.LEFT,
+            background="#ffffe0",
+            foreground="#222",
+            relief=tk.SOLID,
+            borderwidth=1,
+            wraplength=self._WRAP_PX,
+            padx=6,
+            pady=3,
+        ).pack()
+        self._tip = tip
+
+    def _hide(self) -> None:
+        if self._tip is not None:
+            with contextlib.suppress(tk.TclError):
+                self._tip.destroy()
+            self._tip = None
+
+
+def _add_tooltip(widget: tk.Widget, text: str) -> None:
+    """Attach a hover tooltip with ``text`` to ``widget``.
+
+    Multiple calls on the same widget replace any previously attached
+    tooltip's text; each widget ends up with at most one active
+    :class:`_Tooltip` instance stored under the ``_qr23mf_tooltip``
+    attribute.
+    """
+    existing: _Tooltip | None = getattr(widget, "_qr23mf_tooltip", None)
+    if existing is not None:
+        existing.text = text
+        return
+    tip = _Tooltip(widget, text)
+    widget._qr23mf_tooltip = tip  # type: ignore[attr-defined]
 
 
 def _snap_coord(value: float, anchors: list[float]) -> float:
