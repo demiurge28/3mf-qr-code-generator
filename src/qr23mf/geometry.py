@@ -498,10 +498,17 @@ def build_meshes(
         qr_finish: ``"extruded"`` (default, raised above plate),
             ``"flush"`` (pixels occupy the plate's top slab; base unchanged),
             or ``"sunken"`` (pixels occupy the plate's top slab **and** the
-            base has matching pockets carved into its top face).
-        text_labels: Optional iterable of :class:`TextLabel` to extrude on the
-            plate top. Each label is rasterized with Pillow; dark pixels are
-            extruded as tiny axis-aligned boxes.
+            base has matching pockets carved into its top face). Text labels
+            **mirror** this selection: in ``flush`` / ``sunken`` mode each
+            label's raster cells live in the top ``extrusion_mm`` slab of
+            the plate rather than rising above it.
+        text_labels: Optional iterable of :class:`TextLabel` to place on the
+            plate. Each label is rasterized with Pillow; dark pixels are
+            extruded as axis-aligned boxes whose Z range is governed by
+            ``qr_finish``. For ``flush`` and ``sunken`` finishes each
+            label's ``extrusion_mm`` must be less than
+            ``params.base_height_mm`` so the text doesn't pierce the
+            plate's bottom.
 
     Returns:
         ``(base_mesh, features_mesh)``. ``features_mesh`` contains the QR
@@ -699,11 +706,30 @@ def build_meshes(
         cell_f32 = np.float32(cell_mm)
         lx0_f = np.float32(lx0)
         ly_top_f = np.float32(ly_top)
-        # Text labels also sink into the base top by the same overlap so
-        # each raster cell is anchored to the base (same slicer-floating
-        # reasoning as the QR modules above).
-        z_text_bot = z_plate_top - np.float32(feature_z_overlap)
-        z_text_top = z_plate_top + np.float32(label.extrusion_mm)
+        # Text-label Z range mirrors the QR ``qr_finish`` selection so the
+        # whole design is visually consistent:
+        #
+        # * ``"extruded"`` (default) — text rises above the plate, with a
+        #   0.1 mm sink into the base top for slicer anchoring (same
+        #   reason as the QR modules above).
+        # * ``"flush"`` / ``"sunken"`` — text occupies the top
+        #   ``extrusion_mm`` slab of the plate instead of rising above it,
+        #   matching the flush / sunken behavior applied to QR modules.
+        #   Requires ``extrusion_mm < base_height_mm`` so the text
+        #   doesn't pierce through the bottom of the plate.
+        if qr_finish == "extruded":
+            z_text_bot = z_plate_top - np.float32(feature_z_overlap)
+            z_text_top = z_plate_top + np.float32(label.extrusion_mm)
+        else:  # "flush" or "sunken": text lives inside the plate top slab.
+            if label.extrusion_mm >= params.base_height_mm:
+                raise ValueError(
+                    f"text label {label.content!r} extrusion_mm="
+                    f"{label.extrusion_mm} must be < base_height_mm="
+                    f"{params.base_height_mm} for {qr_finish!r} finish "
+                    f"(text sits inside the plate's top slab)."
+                )
+            z_text_bot = np.float32(params.base_height_mm - label.extrusion_mm)
+            z_text_top = z_plate_top
 
         rows_f = dark_r.astype(np.float32)
         cols_f = dark_c.astype(np.float32)

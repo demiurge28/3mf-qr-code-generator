@@ -653,6 +653,59 @@ def test_flush_finish_does_not_add_z_overlap_below_base() -> None:
     assert pytest.approx(z_min, abs=1e-4) == 1.0
 
 
+def test_text_labels_flush_finish_occupy_top_slab() -> None:
+    """Text labels in flush finish sit inside the plate top slab, not above."""
+    matrix = _all_light(5)
+    params = GeometryParams(
+        size_mm=80.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    label = TextLabel(content="A", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.0)
+    _, features = build_meshes(matrix, params, qr_finish="flush", text_labels=(label,))
+    verts = features.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == (
+        params.base_height_mm - label.extrusion_mm
+    )
+    assert pytest.approx(verts[:, 2].max(), abs=1e-4) == params.base_height_mm
+
+
+def test_text_labels_sunken_finish_occupy_top_slab() -> None:
+    """Text labels in sunken finish mirror flush: top slab placement."""
+    matrix = _all_light(5)
+    params = GeometryParams(
+        size_mm=80.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    label = TextLabel(content="B", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=0.8)
+    _, features = build_meshes(matrix, params, qr_finish="sunken", text_labels=(label,))
+    verts = features.vectors.reshape(-1, 3)
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == (
+        params.base_height_mm - label.extrusion_mm
+    )
+    assert pytest.approx(verts[:, 2].max(), abs=1e-4) == params.base_height_mm
+
+
+def test_text_labels_flush_rejects_extrusion_ge_base_height() -> None:
+    """Flush/sunken text must fit inside the base so extrusion < base_h."""
+    matrix = _all_light(5)
+    # extrusion_mm == base_height_mm would push the text through the bottom.
+    params = GeometryParams(
+        size_mm=80.0, base_height_mm=1.0, pixel_height_mm=0.5, quiet_zone_modules=0
+    )
+    label = TextLabel(content="C", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.0)
+    with pytest.raises(ValueError, match="base_height_mm"):
+        build_meshes(matrix, params, qr_finish="flush", text_labels=(label,))
+
+
+def test_text_labels_sunken_rejects_extrusion_ge_base_height() -> None:
+    """Same bound check applies in sunken mode."""
+    matrix = _all_light(5)
+    params = GeometryParams(
+        size_mm=80.0, base_height_mm=1.0, pixel_height_mm=0.5, quiet_zone_modules=0
+    )
+    label = TextLabel(content="D", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.5)
+    with pytest.raises(ValueError, match="base_height_mm"):
+        build_meshes(matrix, params, qr_finish="sunken", text_labels=(label,))
+
+
 def test_very_thin_base_caps_overlap_at_half_base_height() -> None:
     """A 0.1 mm base plate must not have features piercing through its bottom.
 
