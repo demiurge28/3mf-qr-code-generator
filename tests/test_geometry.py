@@ -141,6 +141,10 @@ def test_all_dark_produces_pixels_covering_usable_area() -> None:
     on every XY side so face-adjacent cells never share vertices, which
     pushes the outer min / max inward by that same half-micron. A 2 um
     absolute tolerance covers the shrink comfortably.
+
+    The pixel mesh also sinks into the base by ``_FEATURE_Z_OVERLAP_MM``
+    (0.1 mm) so slicers anchor each module to the base; the Z min is
+    therefore ``base_height_mm - 0.1`` rather than exactly ``base_height_mm``.
     """
     size = 5
     params = GeometryParams(size_mm=100.0, quiet_zone_modules=2)
@@ -156,8 +160,8 @@ def test_all_dark_produces_pixels_covering_usable_area() -> None:
     assert pytest.approx(verts[:, 0].max(), abs=2e-3) == +usable_half
     assert pytest.approx(verts[:, 1].min(), abs=2e-3) == -usable_half
     assert pytest.approx(verts[:, 1].max(), abs=2e-3) == +usable_half
-    # Z should sit exactly on top of the base (shrink is XY-only).
-    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == params.base_height_mm
+    # Z min sinks 0.1 mm into the base; Z max is the visible feature top.
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == (params.base_height_mm - 0.1)
     assert pytest.approx(verts[:, 2].max(), abs=1e-4) == (
         params.base_height_mm + params.pixel_height_mm
     )
@@ -403,13 +407,18 @@ def test_text_labels_contribute_triangles_to_features_mesh() -> None:
 
 
 def test_text_labels_above_plate_top() -> None:
-    """Text extrusion must sit strictly above the plate top face."""
+    """Text extrusion sits above the plate top, with a small Z overlap into the base.
+
+    Each raster cell sinks 0.1 mm into the base (``_FEATURE_Z_OVERLAP_MM``)
+    so the slicer anchors it and doesn't flag it as a floating region.
+    The visible top of the label is still at ``base_height_mm + extrusion_mm``.
+    """
     matrix = _all_light(5)
     params = GeometryParams(size_mm=80.0, base_height_mm=2.0, quiet_zone_modules=0)
     label = TextLabel(content="Z", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.5)
     _, features = build_meshes(matrix, params, text_labels=(label,))
     verts = features.vectors.reshape(-1, 3)
-    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == params.base_height_mm
+    assert pytest.approx(verts[:, 2].min(), abs=1e-4) == (params.base_height_mm - 0.1)
     assert pytest.approx(verts[:, 2].max(), abs=1e-4) == (
         params.base_height_mm + label.extrusion_mm
     )
@@ -603,3 +612,60 @@ def test_real_qr_square_mode_features_mesh_is_manifold_shaped() -> None:
     params = GeometryParams()
     _, features = build_meshes(matrix, params, module_style="square")
     assert _count_duplicate_vertex_sets(features.vectors) == 0
+
+
+# --- Feature Z-overlap with the base (slicer anchoring) ----------------------
+
+
+def test_extruded_features_sink_into_base_top_by_0_1mm() -> None:
+    """Extruded features overlap the base's top by 0.1 mm for slicer anchoring."""
+    matrix = _all_dark(3)
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    _, pixels = build_meshes(matrix, params)  # extruded by default
+    z_min = float(pixels.vectors.reshape(-1, 3)[:, 2].min())
+    z_max = float(pixels.vectors.reshape(-1, 3)[:, 2].max())
+    assert pytest.approx(z_min, abs=1e-4) == 1.9  # base_h - 0.1
+    assert pytest.approx(z_max, abs=1e-4) == 3.0  # base_h + pixel_h
+
+
+def test_extruded_text_labels_sink_into_base_top_by_0_1mm() -> None:
+    """Text labels also overlap the base's top so raster cells aren't floating."""
+    matrix = _all_light(5)
+    params = GeometryParams(size_mm=80.0, base_height_mm=2.0, quiet_zone_modules=0)
+    label = TextLabel(content="A", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.0)
+    _, features = build_meshes(matrix, params, text_labels=(label,))
+    z_min = float(features.vectors.reshape(-1, 3)[:, 2].min())
+    assert pytest.approx(z_min, abs=1e-4) == (params.base_height_mm - 0.1)
+
+
+def test_flush_finish_does_not_add_z_overlap_below_base() -> None:
+    """Flush features already live in the base's top slab; no extra overlap."""
+    matrix = _all_dark(3)
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=0
+    )
+    _, pixels = build_meshes(matrix, params, qr_finish="flush")
+    z_min = float(pixels.vectors.reshape(-1, 3)[:, 2].min())
+    # Flush pixels still sit at base_h - pixel_h = 1.0 mm; the extruded
+    # overlap only applies to extruded mode.
+    assert pytest.approx(z_min, abs=1e-4) == 1.0
+
+
+def test_very_thin_base_caps_overlap_at_half_base_height() -> None:
+    """A 0.1 mm base plate must not have features piercing through its bottom.
+
+    The overlap is capped at half the base height, so features start no
+    lower than ``base_h / 2`` even for unusually thin plates.
+    """
+    matrix = _all_dark(3)
+    # 0.1 mm base would allow a 0.05 mm overlap cap; pixel_h=0.5 mm
+    # extrudes above the plate.
+    params = GeometryParams(
+        size_mm=30.0, base_height_mm=0.1, pixel_height_mm=0.5, quiet_zone_modules=0
+    )
+    _, pixels = build_meshes(matrix, params)
+    z_min = float(pixels.vectors.reshape(-1, 3)[:, 2].min())
+    # Overlap is min(0.1, 0.1 * 0.5) = 0.05 mm -> z_min = 0.1 - 0.05 = 0.05
+    assert pytest.approx(z_min, abs=1e-4) == 0.05

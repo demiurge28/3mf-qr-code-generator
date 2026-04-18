@@ -84,6 +84,20 @@ _TEXT_PX_HEIGHT: Final[int] = 32
 #: slicer preview are visually indistinguishable from a gapless tiling.
 _FEATURE_EDGE_SHRINK_MM: Final[float] = 0.0005
 
+#: Depth (millimetres) that extruded features (QR modules + text labels)
+#: sink into the top of the base plate. Without this overlap the features'
+#: bottom face sits at exactly ``base_height_mm``, coincident with the
+#: base's top face. Slicers that process the two 3MF objects independently
+#: (Bambu Studio, OrcaSlicer, PrusaSlicer) then treat every feature box as
+#: a floating island with nothing supporting its bottom face and either
+#: warn about floating regions or generate broken infill, producing an
+#: unreadable QR. Embedding the features 0.1 mm into the base's top slab
+#: makes the overlap unambiguous: the features mesh has genuine volume
+#: below its visible top, and the slicer anchors every module to the base
+#: with no ambiguity. 0.1 mm is ~half a standard slicer layer height, so
+#: the visible QR color still appears to start exactly at ``base_height_mm``.
+_FEATURE_Z_OVERLAP_MM: Final[float] = 0.1
+
 _FloatArray = npt.NDArray[np.float32]
 _BoolArray = npt.NDArray[np.bool_]
 
@@ -554,10 +568,15 @@ def build_meshes(
 
     # Pixel and plate-top Z heights (finish-mode aware).
     z_plate_top = np.float32(params.base_height_mm)
+    # Features sink a small distance into the base top so the slicer sees
+    # them as anchored rather than floating. Cap the overlap at half the
+    # base height so a very thin plate doesn't end up with features that
+    # pierce through the bottom.
+    feature_z_overlap = float(min(_FEATURE_Z_OVERLAP_MM, params.base_height_mm * 0.5))
     if qr_finish == "extruded":
-        z_pixel_bot = z_plate_top
+        z_pixel_bot = z_plate_top - np.float32(feature_z_overlap)
         z_pixel_top = z_plate_top + np.float32(params.pixel_height_mm)
-    else:  # flush or sunken: pixels occupy the top slab of the plate.
+    else:  # flush or sunken: pixels already occupy the top slab of the plate.
         z_pixel_bot = np.float32(params.base_height_mm - params.pixel_height_mm)
         z_pixel_top = z_plate_top
 
@@ -680,6 +699,10 @@ def build_meshes(
         cell_f32 = np.float32(cell_mm)
         lx0_f = np.float32(lx0)
         ly_top_f = np.float32(ly_top)
+        # Text labels also sink into the base top by the same overlap so
+        # each raster cell is anchored to the base (same slicer-floating
+        # reasoning as the QR modules above).
+        z_text_bot = z_plate_top - np.float32(feature_z_overlap)
         z_text_top = z_plate_top + np.float32(label.extrusion_mm)
 
         rows_f = dark_r.astype(np.float32)
@@ -702,7 +725,7 @@ def build_meshes(
             text_tris[i * 12 : (i + 1) * 12] = _extrude_axis_aligned_box(
                 float(tx0s[i]),
                 float(ty0s[i]),
-                float(z_plate_top),
+                float(z_text_bot),
                 float(tx1s[i]),
                 float(ty1s[i]),
                 float(z_text_top),
