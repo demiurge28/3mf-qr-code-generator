@@ -94,6 +94,14 @@ def test_write_3mf_omits_features_object_when_mesh_empty(tmp_path: Path) -> None
 
 
 def test_model_vertex_and_triangle_counts_match_mesh(tmp_path: Path) -> None:
+    """Triangle counts match; vertex counts reflect position-level dedup.
+
+    The writer deduplicates vertices by exact position so slicers see
+    shared edges and treat the mesh as manifold. A simple axis-aligned
+    box (the base) collapses from 36 vertex entries to exactly 8 corner
+    vertices; the features mesh still has at most ``3 * n_triangles``
+    vertex entries (and usually far fewer once adjacent cells are merged).
+    """
     matrix = build_matrix("counts", ec="M")
     base, features = build_meshes(matrix, GeometryParams())
     n_base = base.vectors.shape[0]
@@ -107,9 +115,10 @@ def test_model_vertex_and_triangle_counts_match_mesh(tmp_path: Path) -> None:
     mesh2_vertices = obj2.findall(f"{_CORE_NS}mesh/{_CORE_NS}vertices/{_CORE_NS}vertex")
     mesh2_triangles = obj2.findall(f"{_CORE_NS}mesh/{_CORE_NS}triangles/{_CORE_NS}triangle")
     assert len(mesh1_triangles) == n_base
-    assert len(mesh1_vertices) == n_base * 3
+    # Base is a simple box: exactly 8 unique corner vertices.
+    assert len(mesh1_vertices) == 8
     assert len(mesh2_triangles) == n_feat
-    assert len(mesh2_vertices) == n_feat * 3
+    assert 0 < len(mesh2_vertices) <= n_feat * 3
 
 
 def test_model_declares_millimeter_units(tmp_path: Path) -> None:
@@ -130,3 +139,34 @@ def test_write_3mf_is_byte_identical_across_runs(tmp_path: Path) -> None:
     write_3mf(base, features, a)
     write_3mf(base, features, b)
     assert a.read_bytes() == b.read_bytes()
+
+
+def test_emitted_mesh_is_edge_manifold(tmp_path: Path) -> None:
+    """Every edge in each emitted ``<object>`` is shared by exactly 2 triangles.
+
+    Slicers (Bambu Studio, OrcaSlicer, PrusaSlicer) walk edges by vertex
+    index; an edge touched by only one triangle or by three or more shows
+    up as 'non-manifold'. This test parses each object's triangles as
+    (sorted) index pairs and asserts every pair has count == 2.
+    """
+    matrix = build_matrix("https://example.com/manifold-3mf", ec="M")
+    base, features = build_meshes(matrix, GeometryParams())
+    out = tmp_path / "plate.3mf"
+    write_3mf(base, features, out)
+    root = _parse_model(out)
+    objects = root.findall(f"{_CORE_NS}resources/{_CORE_NS}object")
+    assert objects, "at least one object expected"
+    for obj in objects:
+        edges: dict[tuple[int, int], int] = {}
+        for t in obj.findall(f"{_CORE_NS}mesh/{_CORE_NS}triangles/{_CORE_NS}triangle"):
+            v1 = int(t.get("v1") or 0)
+            v2 = int(t.get("v2") or 0)
+            v3 = int(t.get("v3") or 0)
+            for a, b in ((v1, v2), (v2, v3), (v3, v1)):
+                key = (a, b) if a < b else (b, a)
+                edges[key] = edges.get(key, 0) + 1
+        bad = {edge: count for edge, count in edges.items() if count != 2}
+        assert not bad, (
+            f"object id={obj.get('id')} has {len(bad)} non-manifold edges "
+            f"(expected each edge touched by exactly 2 triangles)."
+        )

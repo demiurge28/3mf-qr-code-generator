@@ -61,10 +61,19 @@ _FIXED_ZIP_DATE: tuple[int, int, int, int, int, int] = (1980, 1, 1, 0, 0, 0)
 def _object_xml(object_id: int, mesh: Mesh) -> str:
     """Serialize a mesh to a 3MF ``<object>`` element.
 
-    Triangles are emitted with sequential vertex indices ``(3i, 3i+1,
-    3i+2)`` rather than a deduplicated vertex table \u2014 this keeps the
-    writer simple and deterministic at the cost of a larger file. Slicers
-    handle the duplicates fine.
+    Vertices are **deduplicated by exact position**: every triangle looks
+    up each of its three vertices in a position -> index map and reuses
+    the existing index when the same position has already been emitted.
+    Triangles that share a physical edge therefore share the same pair of
+    indices in the ``<triangle>`` entries. Without this, Bambu Studio /
+    OrcaSlicer's manifold analysis (which walks edges by index, not by
+    position) flags every edge as non-manifold even though the mesh is
+    geometrically watertight.
+
+    Deduplication uses the raw float32 byte representation as the key, so
+    bit-exact positions from the geometry layer (which builds boxes on a
+    shared grid) collapse to the same vertex entry without any tolerance
+    heuristics.
     """
     tris = mesh.vectors  # shape (N, 3, 3) float32
     n_tris = int(tris.shape[0]) if tris.size else 0
@@ -74,16 +83,26 @@ def _object_xml(object_id: int, mesh: Mesh) -> str:
             f'<object id="{object_id}" type="model"><mesh><vertices/><triangles/></mesh></object>'
         )
 
-    # Flatten to a contiguous (3N, 3) vertex sequence.
-    flat = tris.reshape(-1, 3)
-    verts_parts: list[str] = []
-    for v in flat:
-        verts_parts.append(
-            f'<vertex x="{float(v[0]):.6f}" y="{float(v[1]):.6f}" z="{float(v[2]):.6f}"/>'
-        )
-    tris_parts = [
-        f'<triangle v1="{i * 3}" v2="{i * 3 + 1}" v3="{i * 3 + 2}"/>' for i in range(n_tris)
+    vertex_index: dict[bytes, int] = {}
+    vertices_in_order: list[tuple[float, float, float]] = []
+    triangle_indices: list[tuple[int, int, int]] = []
+    for i in range(n_tris):
+        idx: list[int] = []
+        for j in range(3):
+            v = tris[i, j]  # float32 (3,)
+            key = v.tobytes()
+            found = vertex_index.get(key)
+            if found is None:
+                found = len(vertices_in_order)
+                vertex_index[key] = found
+                vertices_in_order.append((float(v[0]), float(v[1]), float(v[2])))
+            idx.append(found)
+        triangle_indices.append((idx[0], idx[1], idx[2]))
+
+    verts_parts = [
+        f'<vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>' for (x, y, z) in vertices_in_order
     ]
+    tris_parts = [f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for (a, b, c) in triangle_indices]
     return (
         f'<object id="{object_id}" type="model">'
         f"<mesh><vertices>{''.join(verts_parts)}</vertices>"

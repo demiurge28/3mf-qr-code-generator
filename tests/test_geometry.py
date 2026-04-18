@@ -135,7 +135,13 @@ def test_pixel_count_matches_dark_module_count() -> None:
 
 
 def test_all_dark_produces_pixels_covering_usable_area() -> None:
-    """With a fully-dark matrix, the pixel mesh XY extent equals the usable area."""
+    """With a fully-dark matrix, the pixel mesh XY extent equals the usable area.
+
+    Each square module is shrunk by ``_FEATURE_EDGE_SHRINK_MM`` (0.5 um)
+    on every XY side so face-adjacent cells never share vertices, which
+    pushes the outer min / max inward by that same half-micron. A 2 um
+    absolute tolerance covers the shrink comfortably.
+    """
     size = 5
     params = GeometryParams(size_mm=100.0, quiet_zone_modules=2)
     matrix = _all_dark(size)
@@ -146,11 +152,11 @@ def test_all_dark_produces_pixels_covering_usable_area() -> None:
     usable_half = 50.0 - quiet_mm
 
     verts = pixels.vectors.reshape(-1, 3)
-    assert pytest.approx(verts[:, 0].min(), abs=1e-4) == -usable_half
-    assert pytest.approx(verts[:, 0].max(), abs=1e-4) == +usable_half
-    assert pytest.approx(verts[:, 1].min(), abs=1e-4) == -usable_half
-    assert pytest.approx(verts[:, 1].max(), abs=1e-4) == +usable_half
-    # Z should sit exactly on top of the base.
+    assert pytest.approx(verts[:, 0].min(), abs=2e-3) == -usable_half
+    assert pytest.approx(verts[:, 0].max(), abs=2e-3) == +usable_half
+    assert pytest.approx(verts[:, 1].min(), abs=2e-3) == -usable_half
+    assert pytest.approx(verts[:, 1].max(), abs=2e-3) == +usable_half
+    # Z should sit exactly on top of the base (shrink is XY-only).
     assert pytest.approx(verts[:, 2].min(), abs=1e-4) == params.base_height_mm
     assert pytest.approx(verts[:, 2].max(), abs=1e-4) == (
         params.base_height_mm + params.pixel_height_mm
@@ -262,17 +268,21 @@ def test_rectangular_plate_produces_correct_base_extent() -> None:
 
 
 def test_rectangular_plate_centers_qr_on_smaller_dimension() -> None:
-    """Without explicit placement, QR fills the smaller dimension (50 mm here)."""
+    """Without explicit placement, QR fills the smaller dimension (50 mm here).
+
+    XY tolerance is 2 um to absorb the per-cell ``_FEATURE_EDGE_SHRINK_MM``
+    that keeps adjacent square modules from sharing vertices.
+    """
     matrix = _all_dark(5)
     params = GeometryParams(size_mm=100.0, depth_mm=50.0, quiet_zone_modules=2)
     _, pixels = build_meshes(matrix, params)
     verts = pixels.vectors.reshape(-1, 3)
     module_mm = 50.0 / (5 + 2 * 2)
     usable_half = 50.0 / 2 - 2 * module_mm
-    assert pytest.approx(verts[:, 0].min(), abs=1e-4) == -usable_half
-    assert pytest.approx(verts[:, 0].max(), abs=1e-4) == +usable_half
-    assert pytest.approx(verts[:, 1].min(), abs=1e-4) == -usable_half
-    assert pytest.approx(verts[:, 1].max(), abs=1e-4) == +usable_half
+    assert pytest.approx(verts[:, 0].min(), abs=2e-3) == -usable_half
+    assert pytest.approx(verts[:, 0].max(), abs=2e-3) == +usable_half
+    assert pytest.approx(verts[:, 1].min(), abs=2e-3) == -usable_half
+    assert pytest.approx(verts[:, 1].max(), abs=2e-3) == +usable_half
 
 
 # --- QrPlacement validation and positioning -----------------------------------
@@ -292,17 +302,20 @@ def test_qr_placement_defaults() -> None:
 
 
 def test_qr_placement_shrinks_and_offsets_qr() -> None:
-    """A 30 mm QR offset by +20 mm X must sit entirely right of plate center."""
+    """A 30 mm QR offset by +20 mm X must sit entirely right of plate center.
+
+    XY tolerance is 2 um to absorb the per-cell ``_FEATURE_EDGE_SHRINK_MM``.
+    """
     matrix = _all_dark(5)
     params = GeometryParams(size_mm=100.0, quiet_zone_modules=0)
     placement = QrPlacement(qr_size_mm=30.0, x_offset_mm=20.0)
     _, pixels = build_meshes(matrix, params, placement=placement)
     verts = pixels.vectors.reshape(-1, 3)
     # QR spans x in [20 - 15, 20 + 15] = [5, 35].
-    assert pytest.approx(verts[:, 0].min(), abs=1e-4) == 5.0
-    assert pytest.approx(verts[:, 0].max(), abs=1e-4) == 35.0
-    assert pytest.approx(verts[:, 1].min(), abs=1e-4) == -15.0
-    assert pytest.approx(verts[:, 1].max(), abs=1e-4) == +15.0
+    assert pytest.approx(verts[:, 0].min(), abs=2e-3) == 5.0
+    assert pytest.approx(verts[:, 0].max(), abs=2e-3) == 35.0
+    assert pytest.approx(verts[:, 1].min(), abs=2e-3) == -15.0
+    assert pytest.approx(verts[:, 1].max(), abs=2e-3) == +15.0
 
 
 def test_qr_placement_outside_plate_raises() -> None:

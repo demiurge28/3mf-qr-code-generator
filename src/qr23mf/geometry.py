@@ -75,6 +75,15 @@ _DOT_POLYGON_SIDES: Final[int] = 16
 #: of edge ``height_mm / height_px``).
 _TEXT_PX_HEIGHT: Final[int] = 32
 
+#: Per-side XY shrink applied to QR modules and text-label raster cells
+#: before they are extruded. With this in place, face-adjacent cells have a
+#: 2 * _FEATURE_EDGE_SHRINK_MM gap and diagonal-neighbor cells no longer
+#: share vertices either, so the features mesh has no pinch-point
+#: non-manifold edges. The gap is well below any FDM nozzle diameter
+#: (~0.4 mm) and the corresponding slicer voxel size, so the print and the
+#: slicer preview are visually indistinguishable from a gapless tiling.
+_FEATURE_EDGE_SHRINK_MM: Final[float] = 0.0005
+
 _FloatArray = npt.NDArray[np.float32]
 _BoolArray = npt.NDArray[np.bool_]
 
@@ -206,6 +215,12 @@ def _extrude_axis_aligned_box(
     v6 = (x1, y1, z1)
     v7 = (x0, y1, z1)
 
+    # Diagonal-direction convention: every pair of opposing faces uses the
+    # same world-space diagonal, so when two touching cells share a face
+    # the 2+2 triangles on each side have matching vertex sets and the
+    # dedup post-process can drop them in one pass. ``-Y`` and ``+Y`` both
+    # use the (x_min, z_min) <-> (x_max, z_max) diagonal; ``-X`` / ``+X``
+    # and ``-Z`` / ``+Z`` already match in the original triangulation.
     triangles: tuple[tuple[tuple[float, float, float], ...], ...] = (
         # Bottom (-Z)
         (v0, v2, v1),
@@ -213,12 +228,14 @@ def _extrude_axis_aligned_box(
         # Top (+Z)
         (v4, v5, v6),
         (v4, v6, v7),
-        # Front (-Y)
+        # Front (-Y): diagonal v0 <-> v5 (world-space
+        # (x_min, z_min) <-> (x_max, z_max) at y0).
         (v0, v1, v5),
         (v0, v5, v4),
-        # Back (+Y)
-        (v2, v3, v7),
-        (v2, v7, v6),
+        # Back (+Y): same world-space diagonal as front, i.e.
+        # v3 <-> v6 = (x_min, z_min) <-> (x_max, z_max) at y1.
+        (v3, v6, v2),
+        (v3, v7, v6),
         # Left (-X)
         (v0, v4, v3),
         (v4, v7, v3),
@@ -593,6 +610,17 @@ def build_meshes(
         x1s = x0s + module_mm_f32
         y1s = qr_top - quiet_offset_mm - rows_f * module_mm_f32
         y0s = y1s - module_mm_f32
+        # Shrink each square module a half-micron on every XY side so face-
+        # adjacent cells leave a 1 um gap and diagonal-neighbor cells no
+        # longer share an edge, eliminating pinch-point non-manifold edges.
+        # Only applied to ``square`` style; ``dot`` modules are already
+        # inscribed in the cell and never touch their neighbors.
+        if module_style == "square":
+            shrink = np.float32(_FEATURE_EDGE_SHRINK_MM)
+            x0s = x0s + shrink
+            x1s = x1s - shrink
+            y0s = y0s + shrink
+            y1s = y1s - shrink
 
         if module_style == "square":
             pixel_tris = np.zeros((dark_rows.size * 12, 3, 3), dtype=np.float32)
@@ -660,6 +688,14 @@ def build_meshes(
         tx1s = tx0s + cell_f32
         ty1s = ly_top_f - rows_f * cell_f32
         ty0s = ty1s - cell_f32
+        # Same sub-micron XY shrink as QR square modules so adjacent raster
+        # cells of the same label (and cells from different labels that
+        # happen to align) never share vertices or pinch-edges.
+        shrink = np.float32(_FEATURE_EDGE_SHRINK_MM)
+        tx0s = tx0s + shrink
+        tx1s = tx1s - shrink
+        ty0s = ty0s + shrink
+        ty1s = ty1s - shrink
 
         text_tris = np.zeros((dark_r.size * 12, 3, 3), dtype=np.float32)
         for i in range(dark_r.size):
