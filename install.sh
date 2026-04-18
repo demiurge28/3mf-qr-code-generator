@@ -93,21 +93,38 @@ cyan "    host:   $OS"
 
 # -----------------------------------------------------------------------------
 # Python >= 3.11
+#
+# Probe specific minor versions (python3.13 -> 3.12 -> 3.11) before falling
+# back to `python3`. This picks up Homebrew's python@3.11/3.12/3.13 even
+# when the system `/usr/bin/python3` (macOS 3.9.x on older installs) comes
+# earlier on PATH.
 # -----------------------------------------------------------------------------
 
-if ! command -v python3 >/dev/null 2>&1; then
-    die "python3 not found on PATH. Install Python 3.11+ first."
+PYTHON=""
+for candidate in python3.13 python3.12 python3.11; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        PYTHON="$candidate"
+        break
+    fi
+done
+if [ -z "$PYTHON" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON="python3"
+    else
+        die "No Python 3.11+ found. Tried python3.13 / 3.12 / 3.11 / python3."
+    fi
 fi
 
-PY_VERSION="$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')"
+PY_VERSION="$("$PYTHON" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')"
 PY_MAJOR="${PY_VERSION%%.*}"
 PY_TMP="${PY_VERSION#*.}"
 PY_MINOR="${PY_TMP%%.*}"
 
 if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }; then
-    die "Python 3.11 or newer is required (found $PY_VERSION)."
+    die "Python 3.11 or newer is required (found $PY_VERSION at $(command -v "$PYTHON")). \
+Install python@3.11 / 3.12 / 3.13 (Homebrew: 'brew install python@3.11') and re-run."
 fi
-cyan "    python: $PY_VERSION"
+cyan "    python: $PY_VERSION ($(command -v "$PYTHON"))"
 
 # -----------------------------------------------------------------------------
 # Pick install tool (uv preferred, pipx fallback, offer to install uv)
@@ -185,7 +202,7 @@ install_tk_linux() {
 }
 
 if [ "$SKIP_TK" -ne 1 ]; then
-    if python3 -c "import tkinter" >/dev/null 2>&1; then
+    if "$PYTHON" -c "import tkinter" >/dev/null 2>&1; then
         cyan "    tk: already available"
     else
         yellow "Tkinter is not available in python3. 'qr23mf gui' needs it."

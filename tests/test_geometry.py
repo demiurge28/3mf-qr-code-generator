@@ -119,11 +119,19 @@ def test_empty_matrix_produces_empty_pixels_mesh() -> None:
 
 
 def test_pixel_count_matches_dark_module_count() -> None:
+    """Triangle count is bounded by 12 per dark module.
+
+    Adjacent dark modules share internal faces that the manifold-dedup
+    post-process strips, so the real count is ``<= n_dark * 12`` and is
+    always divisible by 4 (each shared face removes 4 triangles).
+    """
     matrix = build_matrix("https://example.com", ec="M")
     params = GeometryParams()
     _, pixels = build_meshes(matrix, params)
-    expected_pixels = int(matrix.modules.sum())
-    assert pixels.vectors.shape == (expected_pixels * 12, 3, 3)
+    n_dark = int(matrix.modules.sum())
+    assert pixels.vectors.shape[0] > 0
+    assert pixels.vectors.shape[0] <= n_dark * 12
+    assert pixels.vectors.shape[0] % 4 == 0
 
 
 def test_all_dark_produces_pixels_covering_usable_area() -> None:
@@ -217,9 +225,12 @@ def test_real_qr_produces_reasonable_triangle_counts() -> None:
     matrix = build_matrix("https://github.com/demiurge28/3mf-qr-code-generator", ec="Q")
     base, pixels = build_meshes(matrix, GeometryParams())
     assert base.vectors.shape == (12, 3, 3)
-    # Pixel count is 12 x number of dark modules.
-    assert pixels.vectors.shape[0] % 12 == 0
+    # After the manifold dedup, counts are <= naive 12-per-module bound
+    # and triangle pairs are dropped in fours (two back-to-back quads).
+    n_dark = int(matrix.modules.sum())
     assert pixels.vectors.shape[0] > 0
+    assert pixels.vectors.shape[0] <= n_dark * 12
+    assert pixels.vectors.shape[0] % 4 == 0
 
 
 # --- Non-square plate (depth_mm) ----------------------------------------------
@@ -371,10 +382,11 @@ def test_text_labels_contribute_triangles_to_features_mesh() -> None:
     params = GeometryParams(size_mm=80.0, quiet_zone_modules=0)
     label = TextLabel(content="A", x_mm=0.0, y_mm=0.0, height_mm=10.0, extrusion_mm=1.0)
     _, features = build_meshes(matrix, params, text_labels=(label,))
-    # Each dark raster pixel becomes 12 triangles; at minimum we should get
-    # several dozen triangles for a single character.
+    # Each dark raster pixel contributes up to 12 triangles; the manifold
+    # dedup drops shared internal faces, so triangle counts come in
+    # multiples of 4 after pruning.
     assert features.vectors.shape[0] > 0
-    assert features.vectors.shape[0] % 12 == 0
+    assert features.vectors.shape[0] % 4 == 0
 
 
 def test_text_labels_above_plate_top() -> None:
@@ -474,8 +486,11 @@ def test_sunken_base_contains_pocket_geometry() -> None:
     )
     base, pixels = build_meshes(matrix, params, qr_finish="sunken")
     # Bottom slab (12) + quiet-zone ring + light-cell boxes must exceed 12.
+    # After the manifold dedup, shared faces are removed so total count is
+    # no longer a multiple of 12 — just assert it's a multiple of 4 and
+    # above the plain-box threshold.
     assert base.vectors.shape[0] > 12
-    assert base.vectors.shape[0] % 12 == 0
+    assert base.vectors.shape[0] % 4 == 0
     # Pixels still fill the top slab (same z range as flush).
     verts = pixels.vectors.reshape(-1, 3)
     assert pytest.approx(verts[:, 2].min(), abs=1e-4) == 1.0
@@ -524,3 +539,54 @@ def test_sunken_rejects_pixel_height_not_less_than_base() -> None:
     )
     with pytest.raises(ValueError, match="pixel_height_mm"):
         build_meshes(matrix, params, qr_finish="sunken")
+
+
+# --- Manifold output (no back-to-back internal faces) -------------------------
+
+
+def _count_duplicate_vertex_sets(mesh_vectors: np.ndarray) -> int:
+    """Count triangles whose canonical sorted-vertex key is shared by another.
+
+    Back-to-back internal faces (the non-manifold signature Bambu Studio /
+    OrcaSlicer flag) show up as at least two triangles with identical
+    vertex sets regardless of winding.
+    """
+    seen: dict[bytes, int] = {}
+    for i in range(mesh_vectors.shape[0]):
+        verts = mesh_vectors[i]
+        idx = np.lexsort(verts.T[::-1])
+        key = verts[idx].tobytes()
+        seen[key] = seen.get(key, 0) + 1
+    return sum(count for count in seen.values() if count > 1)
+
+
+def test_features_mesh_has_no_back_to_back_internal_faces() -> None:
+    """Adjacent dark QR modules must not emit coincident shared faces.
+
+    A 2x2-module all-dark region produces 4 touching cubes. Without
+    dedup, the shared inner faces add 8 coincident triangles; with
+    dedup, every surviving triangle's sorted-vertex key is unique.
+    """
+    matrix = _all_dark(2)
+    params = GeometryParams(size_mm=20.0, quiet_zone_modules=0)
+    _, features = build_meshes(matrix, params)
+    assert features.vectors.shape[0] > 0
+    assert _count_duplicate_vertex_sets(features.vectors) == 0
+
+
+def test_sunken_base_mesh_has_no_back_to_back_internal_faces() -> None:
+    """Sunken base is a composite of touching boxes; dedup must remove shared faces."""
+    matrix = build_matrix("sunken-manifold", ec="M")
+    params = GeometryParams(
+        size_mm=60.0, base_height_mm=2.0, pixel_height_mm=1.0, quiet_zone_modules=2
+    )
+    base, _ = build_meshes(matrix, params, qr_finish="sunken")
+    assert _count_duplicate_vertex_sets(base.vectors) == 0
+
+
+def test_real_qr_square_mode_features_mesh_is_manifold_shaped() -> None:
+    """End-to-end check on a realistic QR: no coincident internal faces."""
+    matrix = build_matrix("https://example.com/manifold-check", ec="M")
+    params = GeometryParams()
+    _, features = build_meshes(matrix, params, module_style="square")
+    assert _count_duplicate_vertex_sets(features.vectors) == 0

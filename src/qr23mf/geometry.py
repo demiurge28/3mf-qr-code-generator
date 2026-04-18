@@ -287,6 +287,37 @@ def _extrude_prism(polygon_xy: _FloatArray, z0: float, z1: float) -> _FloatArray
     return triangles
 
 
+def _dedupe_internal_faces(tris: _FloatArray) -> _FloatArray:
+    """Drop triangles that share a vertex set with another triangle.
+
+    Two triangles with the same three vertices (regardless of winding) are
+    the back-to-back internal faces of two axis-aligned boxes that touch at
+    a shared face. Removing both leaves only the exposed boundary of the
+    combined region, which makes the resulting mesh watertight and manifold.
+
+    The canonical key for each triangle is the byte representation of its
+    lexicographically sorted vertex rows, so the winding of the triangle
+    does not matter. Vertices are compared bit-for-bit, which is exact for
+    grid-aligned axis-aligned boxes built with the same float32 expressions.
+
+    Complexity is O(N) in the number of triangles; the returned array
+    preserves the order of surviving triangles.
+    """
+    n = int(tris.shape[0])
+    if n < 2:
+        return tris
+    keys: list[bytes] = []
+    for i in range(n):
+        verts = tris[i]
+        sort_idx = np.lexsort(verts.T[::-1])
+        keys.append(verts[sort_idx].tobytes())
+    counts: dict[bytes, int] = {}
+    for key in keys:
+        counts[key] = counts.get(key, 0) + 1
+    keep = np.array([counts[k] == 1 for k in keys], dtype=np.bool_)
+    return tris[keep]
+
+
 def _triangles_to_mesh(vectors: _FloatArray) -> Mesh:
     """Wrap a ``(N, 3, 3)`` triangle array in an :class:`stl.mesh.Mesh`.
 
@@ -544,6 +575,10 @@ def build_meshes(
             y1=+half_d,
             z1=params.base_height_mm,
         )
+    # Sunken base is a union of touching axis-aligned boxes; dedupe the
+    # internal faces between them so the combined solid is manifold.
+    if qr_finish == "sunken":
+        base_triangles = _dedupe_internal_faces(base_triangles)
     base_mesh = _triangles_to_mesh(base_triangles)
 
     # --- QR modules ---
@@ -640,10 +675,17 @@ def build_meshes(
 
     # --- Merge into features mesh ---
     if not feature_chunks:
-        features_mesh = _triangles_to_mesh(np.zeros((0, 3, 3), dtype=np.float32))
+        features_tris = np.zeros((0, 3, 3), dtype=np.float32)
     elif len(feature_chunks) == 1:
-        features_mesh = _triangles_to_mesh(feature_chunks[0])
+        features_tris = feature_chunks[0]
     else:
-        features_mesh = _triangles_to_mesh(np.concatenate(feature_chunks, axis=0))
+        features_tris = np.concatenate(feature_chunks, axis=0)
+
+    # QR square modules and text-label raster cells are per-cell boxes that
+    # touch their neighbors; dedupe the internal shared faces so slicers
+    # see a single manifold solid per object instead of flagging
+    # non-manifold edges.
+    features_tris = _dedupe_internal_faces(features_tris)
+    features_mesh = _triangles_to_mesh(features_tris)
 
     return base_mesh, features_mesh
