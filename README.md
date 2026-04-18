@@ -2,33 +2,80 @@
 
 `qr23mf` — turn a string or URL into a 3D-printable QR code as a **two-object 3MF** (base plate + QR / text features) that any modern slicer imports as two independently selectable bodies. Built as a small, pure-Python CLI + Tkinter GUI.
 
-> **Status:** stable CLI + GUI. `qr23mf generate --out plate.3mf` writes a two-object 3MF; `qr23mf gui` opens the visual designer.
+> **Status:** stable CLI + GUI. `qr23mf gui` opens the visual designer; `qr23mf generate --out plate.3mf` runs the same pipeline on the command line.
 
-## Install (development)
-
-Requires [uv](https://docs.astral.sh/uv/) and optionally [Task](https://taskfile.dev/).
+## Quick start
 
 ```bash
-uv sync --all-extras
-uv run qr23mf --help
+git clone https://github.com/demiurge28/3mf-qr-code-generator.git
+cd 3mf-qr-code-generator
+./install.sh
+qr23mf gui
 ```
 
-## Install (end users)
+That's it — the installer picks your Python 3.11+ interpreter, chooses `uv` (preferred) or `pipx`, installs qr23mf as a user-level tool, and makes sure Tkinter is available for the GUI.
+
+Installer flags: `--noninteractive`, `--skip-tk`, `--tool=uv|pipx`, `--help`.
+
+If `qr23mf gui` reports `Tkinter is not available`, see [macOS / Homebrew note](#macos--homebrew-note) below.
+
+## GUI (Tkinter)
 
 ```bash
-uv tool install .
-# or
-pipx install .
+qr23mf gui
 ```
 
-Either command exposes a `qr23mf` binary on `PATH`.
+Opens a Tkinter configurator with a **Settings** window (the main designer) and a **Preview** window (opened from **Preview**).
 
-## Usage
+### Settings window
 
-The CLI currently has one real subcommand, `generate`, plus top-level
-`--help` / `--version` flags.
+* **Payload** text and EC level (`L`, `M` [default], `Q`, `H`). Hover any field for a tooltip.
+* **Base plate** width / depth / thickness (rectangular plates supported).
+* **QR code** size and X / Y offset on the plate (`0 mm size` = auto-fit); module extrusion; quiet-zone margin.
+* **Module style**: **Squares** (axis-aligned boxes) or **Dots** (cylindrical prisms).
+* **Finish**: **Extruded** (raised above the plate), **Flush** (default — pixels embedded in the plate top slab), or **Sunken** (pixels occupy the top slab *and* the base has matching pockets carved into its top face, so the QR is visibly recessed even in single-color prints). Text labels mirror this selection.
+* **Text labels** — add, update, remove, or **Remove all**; each label has its own text, X / Y position, height, and extrusion.
+* **Check for updates** button — queries the public GitHub Releases API (5 s timeout) and shows "No New Updates" when current, or offers to open the Releases page in your browser when a newer tag is available.
 
-### Quickstart
+### Interactive layout canvas
+
+A live top-down canvas sits next to the text-label form. It always shows the plate outline, the QR footprint (dashed), and every text label. All spinbox edits redraw it live.
+
+Mouse / trackpad interactions:
+
+* **Left-click on empty plate** — adds a new text label at that point using the current Text / Height / Extrusion form values.
+* **Left-click + drag a label** — moves it, clamped to the plate bounds; the X / Y spinboxes and listbox entry update in real time.
+* **Right-click a label** (or **Ctrl+Click** on macOS) — removes it with a confirmation dialog.
+* **Left-click inside the QR footprint** — selects the QR (highlighted with an orange dashed outline). With the QR selected, the arrow keys **← → ↑ ↓** nudge it in 0.5 mm steps, clamped to keep it inside the plate.
+
+Three toggles below the canvas:
+
+* **Grid** (with an adjustable 1 – 10 mm spinbox) — overlays an alignment grid on the plate. Every 5th line is rendered heavier so you get major gridlines for free.
+* **Snap** — when enabled, label drags and click-to-add both snap independently on X and Y to the nearest alignment anchor within 1 mm. Anchors include the plate center, plate edges, QR center and edges, every other label's center, and — when the grid is also on — every grid line. Moves that land more than 1 mm from any anchor pass through unchanged.
+* **Show spacing** — when enabled, the currently selected label is annotated with dashed blue guides and mm distances from each side of its bounding box to the nearest plate edge, plus to the nearest QR footprint edge in X / Y when the label doesn't overlap the QR along that axis.
+
+Every interactive element has a pill-shaped hover tooltip with a short plain-language explanation.
+
+### Preview window
+
+Press **Preview** to open a 2D top-down preview with a one-line summary (plate dims, style, finish, label count, triangle counts):
+
+* **Back** — close the preview and return to the settings window.
+* **Create…** — opens a native save dialog and writes a **two-object 3MF** file. Inside the `.3mf`, the base is `objectid=1` and the QR + text features are `objectid=2`, so slicers like Bambu Studio, OrcaSlicer, and PrusaSlicer load them as two independently selectable bodies — assign a different filament to each for a two-color print. The `.3mf` suffix is appended automatically if the save dialog doesn't include one.
+
+### macOS / Homebrew note
+
+Homebrew's Python 3.11 ships without Tk bindings by default. If `qr23mf gui` reports `Tkinter is not available`, install the matching Tk package:
+
+```bash
+brew install python-tk@3.11
+```
+
+Then re-run `./install.sh` (or `uv sync --all-extras`) so the virtual environment picks up the refreshed interpreter.
+
+## CLI (power users)
+
+The same pipeline as the GUI, runnable from the shell. Subcommand: `generate`; plus top-level `--help` / `--version` flags.
 
 ```bash
 # Print the mesh summary for a payload with sensible defaults
@@ -47,8 +94,7 @@ qr23mf generate \
   --out keychain.3mf
 ```
 
-The command prints a human-readable summary that is handy for sanity-checking
-the generated geometry before you slice it:
+The command prints a human-readable summary that is handy for sanity-checking the generated geometry before you slice it:
 
 ```
 Generated QR mesh:
@@ -65,11 +111,7 @@ Generated QR mesh:
 Wrote coaster.3mf
 ```
 
-The resulting `.3mf` is a standard ZIP package with two `<object>` entries in
-`3D/3dmodel.model` (`objectid=1` for the base, `objectid=2` for the QR + text
-features). Bambu Studio, OrcaSlicer, and PrusaSlicer all load them as two
-selectable bodies, so you can assign a different filament to each for a
-two-color print.
+The resulting `.3mf` is a standard ZIP package with two `<object>` entries in `3D/3dmodel.model` (`objectid=1` for the base, `objectid=2` for the QR + text features). Bambu Studio, OrcaSlicer, and PrusaSlicer all load them as two selectable bodies so you can assign a different filament to each for a two-color print.
 
 ### Flag reference
 
@@ -93,107 +135,32 @@ two-color print.
 
 ### Coordinate system
 
-Meshes are produced in millimeter units and positioned so the base plate's
-bottom face lies on `z = 0` and the plate is centered on the XY origin.
-Row 0 of the QR matrix is placed along `+Y` (i.e. the "top" of the code when
-viewed from `+Z`). Dark modules sit on top of the base as separate axis-
-aligned boxes with outward-facing normals, so slicers see watertight solids.
+Meshes are produced in millimeter units and positioned so the base plate's bottom face lies on `z = 0` and the plate is centered on the XY origin. Row 0 of the QR matrix is placed along `+Y` (i.e. the "top" of the code when viewed from `+Z`). Dark modules sit on top of the base as separate axis-aligned boxes with outward-facing normals, so slicers see watertight solids.
 
 ### What's not here yet
 
-* `--base-color` / `--pixel-color` CLI flags to stamp color metadata into
-  the 3MF (today the two objects are material-less; color/filament is
-  assigned in the slicer).
-* Batch mode, preset profiles, embossed vs debossed, logo overlay — later
-  scopes tracked in `vbrief/proposed/`.
+* `--base-color` / `--pixel-color` CLI flags to stamp color metadata into the 3MF (today the two objects are material-less; color/filament is assigned in the slicer).
+* Batch mode, preset profiles, embossed vs debossed, logo overlay — later scopes tracked in `vbrief/proposed/`.
 
-## GUI (Tkinter)
+## Alternative install paths
 
-```bash
-qr23mf gui
-```
-
-Opens a Tkinter configurator with a Settings window (the main designer)
-and a Preview window (opened from **Preview**).
-
-### Settings window
-
-* **Payload** text and EC level (`L` / `M` / `Q` / `H`).
-* **Base plate** width / depth / thickness (rectangular plates supported).
-* **QR code** size and X / Y offset on the plate (`0 mm size` = auto-fit);
-  module extrusion; quiet-zone margin.
-* **Module style**: **Squares** (axis-aligned boxes) or **Dots**
-  (cylindrical prisms).
-* **Finish**: **Extruded** (raised above the plate, default), **Flush**
-  (pixels embedded in the plate top slab), or **Sunken** (pixels occupy
-  the top slab *and* the base has matching pockets carved into its top
-  face, so the QR is visibly recessed even in single-color prints).
-* **Text labels** — add, update, remove, or **Remove all**; each label has
-  its own text, X / Y position, height, and extrusion.
-* **Check for updates** button — queries the public GitHub Releases API
-  (5 s timeout) and shows "No New Updates" when current, or offers to
-  open the Releases page in your browser when a newer tag is available.
-
-### Interactive layout canvas
-
-A live top-down canvas sits next to the text-label form. It always shows
-the plate outline, the QR footprint (dashed), and every text label. All
-spinbox edits redraw it live.
-
-Mouse / trackpad interactions:
-
-* **Left-click on empty plate** — adds a new text label at that point
-  using the current Text / Height / Extrusion form values.
-* **Left-click + drag a label** — moves it, clamped to the plate bounds;
-  the X / Y spinboxes and listbox entry update in real time.
-* **Right-click a label** (or **Ctrl+Click** on macOS) — removes it with
-  a confirmation dialog.
-* **Left-click inside the QR footprint** — selects the QR (highlighted
-  with an orange dashed outline). With the QR selected, the arrow keys
-  **← → ↑ ↓** nudge it in 0.5 mm steps, clamped to keep it inside the
-  plate.
-
-Three toggles below the canvas:
-
-* **Grid (5 mm)** — overlays a 5 mm alignment grid on the plate. Every
-  5th line is rendered heavier (25 mm major spacing for free).
-* **Snap** — when enabled, label drags and click-to-add both snap
-  independently on X and Y to the nearest alignment anchor within 1 mm.
-  Anchors include the plate center, plate edges, QR center and edges,
-  every other label's center, and — when the grid is also on — every
-  grid line. Moves that land more than 1 mm from any anchor pass through
-  unchanged.
-* **Show spacing** — when enabled, the currently selected label is
-  annotated with dashed blue guides and mm distances from each side of
-  its bounding box to the nearest plate edge, plus to the nearest QR
-  footprint edge in X / Y when the label doesn't overlap the QR along
-  that axis.
-
-### Preview window
-
-Press **Preview** to open a 2D top-down preview with a one-line summary
-(plate dims, style, finish, label count, triangle counts):
-
-* **Back** — close the preview and return to the settings window.
-* **Create…** — opens a native save dialog and writes a **two-object 3MF**
-  file. Inside the `.3mf`, the base is `objectid=1` and the QR + text
-  features are `objectid=2`, so slicers like Bambu Studio, OrcaSlicer, and
-  PrusaSlicer load them as two independently selectable bodies — assign a
-  different filament to each for a two-color print. The `.3mf` suffix is
-  appended automatically if the save dialog doesn't include one.
-
-### macOS / Homebrew note
-
-Homebrew's Python 3.11 ships without Tk bindings by default. If
-`qr23mf gui` reports `Tkinter is not available`, install the matching
-Tk package:
+If you'd rather install manually without the `./install.sh` wrapper:
 
 ```bash
-brew install python-tk@3.11
+# End-user install (uv-first, pipx second):
+uv tool install .
+# or
+pipx install .
 ```
 
-Then re-run `uv sync --all-extras` (or reinstall with `uv tool install .`)
-so the virtual environment picks up the refreshed interpreter.
+Either command exposes a `qr23mf` binary on `PATH`.
+
+For a development checkout with the test/typecheck/lint dependencies:
+
+```bash
+uv sync --all-extras
+uv run qr23mf --help
+```
 
 ## Development workflow
 
