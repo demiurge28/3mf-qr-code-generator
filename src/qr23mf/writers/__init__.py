@@ -1,6 +1,7 @@
-"""Mesh writers (STL, 3MF).
+"""Mesh writers.
 
-The STL writer is currently a minimal primitive used by the CLI; the formal
-``stl-writer`` scope will extend it with additional guarantees and tests. The
-3MF writer lives in its own scope (``3mf-writer``) and is not yet implemented.
+qr23mf emits a two-object 3MF package (base + features) via
+:func:`qr23mf.writers.threemf.write_3mf`. Slicers import the two objects
+as independently selectable bodies so each can be assigned a different
+filament for two-color printing.
 """

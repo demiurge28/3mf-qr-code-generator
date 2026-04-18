@@ -41,7 +41,7 @@ from qr23mf.geometry import (
     build_meshes,
 )
 from qr23mf.qr import EcLevel, QrMatrix, build_matrix
-from qr23mf.writers.stl import write_stl
+from qr23mf.writers.threemf import write_3mf
 
 __all__ = ["run"]
 
@@ -1039,16 +1039,15 @@ class _PreviewWindow(tk.Toplevel):
             f"features={features.vectors.shape[0]}"
         )
         ttk.Label(self, text=summary).pack(padx=12, anchor=tk.W)
-
-        # Split-output checkbox: when on, Create writes base + features as
-        # two STL files so the slicer sees two selectable bodies (one per
-        # filament). Default on because the Finish modes are most useful
-        # with multi-material printing.
-        self._split_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
+        ttk.Label(
             self,
-            text="Write separate STLs for base and features (for multi-filament slicers)",
-            variable=self._split_var,
+            text=(
+                "Create\u2026 writes a two-object 3MF (base + features) so your "
+                "slicer can assign a different filament to each body."
+            ),
+            foreground="#555",
+            wraplength=_CANVAS_PX + 80,
+            justify=tk.LEFT,
         ).pack(padx=12, anchor=tk.W, pady=(4, 0))
 
         buttons = ttk.Frame(self)
@@ -1122,27 +1121,18 @@ class _PreviewWindow(tk.Toplevel):
     def _on_create(self) -> None:
         out = filedialog.asksaveasfilename(
             parent=self,
-            title="Save STL",
-            defaultextension=".stl",
-            filetypes=[("Binary STL", "*.stl"), ("All files", "*.*")],
+            title="Save 3MF",
+            defaultextension=".3mf",
+            filetypes=[("3MF package", "*.3mf"), ("All files", "*.*")],
         )
         if not out:
             return
-        path = Path(out)
-        split = bool(self._split_var.get())
         try:
-            written = write_stl(self._base, self._features, path, split=split)
+            written = write_3mf(self._base, self._features, Path(out))
         except OSError as exc:
-            messagebox.showerror("Write failed", f"Could not write STL: {exc}")
+            messagebox.showerror("Write failed", f"Could not write 3MF: {exc}")
             return
-        if len(written) == 1:
-            messagebox.showinfo("Saved", f"Wrote {written[0]}")
-        else:
-            lines = "\n".join(f"\u2022 {p}" for p in written)
-            messagebox.showinfo(
-                "Saved",
-                f"Wrote {len(written)} files (import both for per-filament selection):\n{lines}",
-            )
+        messagebox.showinfo("Saved", f"Wrote {written}")
 
 
 # ---------------------------------------------------------------------------

@@ -10,11 +10,11 @@ from __future__ import annotations
 import builtins
 import re
 import sys
+import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
-from stl.mesh import Mesh
 from typer.testing import CliRunner
 
 from qr23mf import __version__
@@ -119,23 +119,25 @@ def test_generate_rejects_tiny_size_with_exit_code_2() -> None:
     assert "too small" in result.output
 
 
-def test_generate_writes_stl_when_out_is_given(tmp_path: Path) -> None:
-    out = tmp_path / "coaster.stl"
+def test_generate_writes_3mf_when_out_is_given(tmp_path: Path) -> None:
+    out = tmp_path / "coaster.3mf"
     result = runner.invoke(app, ["generate", "--text", "https://example.com", "--out", str(out)])
     assert result.exit_code == 0, result.output
     assert out.exists()
     assert out.stat().st_size > 0
-    # The file should load as a valid binary STL.
-    loaded = Mesh.from_file(str(out))
-    assert loaded.vectors.shape[0] >= 12  # at least the 12 base triangles
+    # The file should be a valid ZIP with the three required 3MF parts.
+    assert zipfile.is_zipfile(out)
+    with zipfile.ZipFile(out) as zf:
+        assert {"[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model"} <= set(zf.namelist())
     assert f"Wrote {out}" in result.stdout
 
 
-def test_generate_appends_stl_suffix_when_missing(tmp_path: Path) -> None:
+def test_generate_appends_3mf_suffix_when_missing(tmp_path: Path) -> None:
     out = tmp_path / "coaster"  # no suffix
     result = runner.invoke(app, ["generate", "--text", "hi", "--out", str(out)])
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "coaster.stl").exists()
+    assert (tmp_path / "coaster.3mf").exists()
+    assert not (tmp_path / "coaster.stl").exists()
 
 
 # --- gui subcommand -----------------------------------------------------------

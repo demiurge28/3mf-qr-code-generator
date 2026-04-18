@@ -1,8 +1,10 @@
 # Installing qr23mf
 
 `qr23mf` is a small pure-Python CLI + Tkinter GUI that turns a string or URL
-into a 3D-printable QR code mesh (single-color binary STL today; two-color
-3MF is on the roadmap).
+into a 3D-printable QR code as a **two-object 3MF** — a standard 3MF
+package containing the base plate and the QR / text features as two
+independently selectable bodies, so any modern slicer can assign a
+different filament to each for a two-color print.
 
 ## Prerequisites
 
@@ -99,10 +101,16 @@ optional feature in the Python installer.
 ## Verifying your install
 
 ```bash
-qr23mf --version                              # prints the qr23mf version
-qr23mf generate --text "qr23mf install ok"    # prints a mesh summary
-qr23mf gui                                    # launches the GUI (needs Tk)
+qr23mf --version                                         # prints the qr23mf version
+qr23mf generate --text "qr23mf install ok"               # prints a mesh summary
+qr23mf generate --text "https://example.com" \
+  --out coaster.3mf                                      # writes a two-object 3MF
+qr23mf gui                                               # launches the GUI (needs Tk)
 ```
+
+Load `coaster.3mf` into Bambu Studio, OrcaSlicer, or PrusaSlicer — you
+should see two parts (the base and the QR / text features) and be able
+to assign a separate filament to each.
 
 ## Uninstalling
 

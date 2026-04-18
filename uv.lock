@@ -4,18 +4,13 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "3mf-qr-code-generator"
-version = "1.2.0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "numpy-stl" },
     { name = "pillow" },
     { name = "segno" },
     { name = "typer" },
-]
-
-[package.optional-dependencies]
-threemf = [
-    { name = "lib3mf", marker = "sys_platform != 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -28,13 +23,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "lib3mf", marker = "sys_platform != 'win32' and extra == 'threemf'", specifier = ">=2.3" },
     { name = "numpy-stl", specifier = ">=3.1,<4" },
     { name = "pillow", specifier = ">=10,<12" },
     { name = "segno", specifier = ">=1.6,<2" },
     { name = "typer", specifier = ">=0.12,<1" },
 ]
-provides-extras = ["threemf"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -185,15 +178,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc35312d08ba8bf51fdd999c576889fc2c24cb97f4f10/iniconfig-2.3.0.tar.gz", hash = "sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730", size = 20503, upload-time = "2025-10-18T21:55:43.219Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
-]
-
-[[package]]
-name = "lib3mf"
-version = "2.5.0"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/87/47504d69f0f36841670d12ce3fe1668025bad74d83ed361ead378f626fed/lib3mf-2.5.0-py3-none-macosx_10_9_universal2.whl", hash = "sha256:f7dc57ea22214fa92dac728ba66e58c4b24b775d467888262a820338d7d84145", size = 2216305, upload-time = "2026-02-23T21:17:35.935Z" },
-    { url = "https://files.pythonhosted.org/packages/88/83/8b987ba95ac0ed9cc7e9c407a579bf43eff6349b1792b4a66c992ce4f76b/lib3mf-2.5.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:b4c00033c47cfeac93b7daa069fb46e8dea4391d5522b79cd6e9f6af75e33013", size = 1575000, upload-time = "2026-02-23T21:17:37.803Z" },
 ]
 
 [[package]]

@@ -1,10 +1,10 @@
 """Typer CLI for qr23mf.
 
-Wires the ``qr``, ``geometry``, and ``writers.stl`` layers into a user-facing
-command surface. The ``generate`` subcommand exposes the full in-memory
-pipeline (text -> QrMatrix -> base + pixels meshes) and optionally writes a
-single-body STL to disk. 3MF output and two-color support land with the
-``3mf-writer`` and ``typer-cli`` scopes.
+Wires the ``qr``, ``geometry``, and ``writers.threemf`` layers into a
+user-facing command surface. The ``generate`` subcommand runs the
+in-memory pipeline (text -> QrMatrix -> base + features meshes) and
+optionally writes a two-object 3MF package to disk so slicers can
+assign a different filament to each body for two-color prints.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import typer
 from qr23mf import __version__
 from qr23mf.geometry import GeometryParams, build_meshes
 from qr23mf.qr import EcLevel, build_matrix
-from qr23mf.writers.stl import write_stl
+from qr23mf.writers.threemf import write_3mf
 
 app = typer.Typer(
     name="qr23mf",
@@ -95,7 +95,11 @@ def generate(
         typer.Option(
             "--out",
             "-o",
-            help="Optional output path. If given, a single-body binary STL is written.",
+            help=(
+                "Optional output path. If given, a two-object 3MF package is "
+                "written (base and features as separate selectable bodies). "
+                "The .3mf suffix is appended if missing."
+            ),
         ),
     ] = None,
     size_mm: Annotated[
@@ -127,9 +131,9 @@ def generate(
 ) -> None:
     """Build a QR mesh from ``--text`` and print its geometry summary.
 
-    Passing ``--out path.stl`` additionally writes a single-body binary STL
-    that can be loaded directly into any slicer. Two-color 3MF output arrives
-    with the ``3mf-writer`` scope.
+    Passing ``--out path.3mf`` additionally writes a 3MF package with two
+    selectable objects (base + features) so any modern slicer can load
+    them as separate bodies and assign a different filament to each.
     """
     ec_upper = ec.upper()
     if ec_upper not in _EC_CHOICES:
@@ -162,11 +166,10 @@ def generate(
     )
 
     if out is not None:
-        out_path = out if out.suffix else out.with_suffix(".stl")
         try:
-            write_stl(base, pixels, out_path)
+            out_path = write_3mf(base, pixels, out)
         except OSError as exc:
-            typer.secho(f"Error writing {out_path}: {exc}", err=True, fg=typer.colors.RED)
+            typer.secho(f"Error writing {out}: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=3) from exc
         typer.echo(f"Wrote {out_path}")
 
@@ -177,7 +180,7 @@ def gui() -> None:
 
     The GUI lets you pick the base-plate dimensions, QR code size and
     position on the plate, add text labels, choose between square and dot
-    modules, and preview the layout before writing a binary STL.
+    modules, and preview the layout before writing a two-object 3MF.
 
     Requires Python's Tk bindings. On macOS with Homebrew Python 3.11
     you may need to install them separately:

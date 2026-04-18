@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "3mf-qr-code-generator"
-version = "1.2.0"
-description = "CLI that turns a string/URL into a 3D-printable two-color 3MF (or single-color STL) of a QR code."
+version = "2.0.0"
+description = "CLI + Tkinter GUI that turns a string/URL into a 3D-printable two-object 3MF (base + features) of a QR code."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "ben" }]
-keywords = ["qr", "3mf", "stl", "3d-printing", "cli"]
+keywords = ["qr", "3mf", "3d-printing", "cli", "gui", "tkinter"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Environment :: Console",
@@ -31,9 +31,6 @@ dependencies = [
   "typer>=0.12,<1",
   "pillow>=10,<12",
 ]
-
-[project.optional-dependencies]
-threemf = ["lib3mf>=2.3; platform_system != 'Windows'"]
 
 [project.scripts]
 qr23mf = "qr23mf.cli:app"
