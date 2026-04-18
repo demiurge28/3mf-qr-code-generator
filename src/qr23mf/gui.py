@@ -141,28 +141,46 @@ class _SettingsApp(ttk.Frame):
             "The string or URL the QR code will encode. Must be non-empty. "
             "Longer payloads push the QR to a higher version (more modules).",
         )
-        ec_label = ttk.Label(text_row, text="EC:")
+        ec_label = ttk.Label(text_row, text="EC (default M):")
         ec_label.pack(side=tk.LEFT, padx=(12, 4))
         self._ec_var = tk.StringVar(value="M")
         ec_combo = ttk.Combobox(
             text_row,
             textvariable=self._ec_var,
             width=4,
-            values=["L", "M", "Q", "H"],
+            values=["L", "M (default)", "Q", "H"],
             state="readonly",
         )
         ec_combo.pack(side=tk.LEFT)
+        # Keep the internal var as a pure one-letter level while showing
+        # the 'M (default)' string in the Combobox list. A trace maps
+        # selections back to the canonical single-letter form.
+        ec_combo.set("M (default)")
+
+        def _normalize_ec(*_args: object) -> None:
+            raw = self._ec_var.get().strip()
+            # 'M (default)' -> 'M'; 'L' / 'Q' / 'H' -> unchanged.
+            if raw.startswith("M") and raw != "M":
+                self._ec_var.set("M")
+            elif raw and raw[0] in ("L", "Q", "H") and raw != raw[0]:
+                self._ec_var.set(raw[0])
+
+        self._ec_var.trace_add("write", _normalize_ec)
         _add_tooltip(
             ec_label,
             "Error-correction level. L \u224807%, M \u224815%, Q \u224825%, "
             "H \u224830% damage tolerance. Higher = more resilient to scratches "
-            "or poor contrast, but requires more modules for the same payload.",
+            "or poor contrast, but requires more modules for the same "
+            "payload. Default: M (\u224815% \u2014 a good balance for most "
+            "prints).",
         )
         _add_tooltip(
             ec_combo,
             "Error-correction level. L \u224807%, M \u224815%, Q \u224825%, "
             "H \u224830% damage tolerance. Higher = more resilient to scratches "
-            "or poor contrast, but requires more modules for the same payload.",
+            "or poor contrast, but requires more modules for the same "
+            "payload. Default: M (\u224815% \u2014 a good balance for most "
+            "prints).",
         )
 
         # --- 3D object (plate) ----------------------------------------------
@@ -292,7 +310,9 @@ class _SettingsApp(ttk.Frame):
         finish_row.pack(fill=tk.X, padx=6, pady=3)
         finish_label = ttk.Label(finish_row, text="Finish:")
         finish_label.pack(side=tk.LEFT)
-        self._finish_var = tk.StringVar(value="extruded")
+        # Default is Flush: the most useful mode for two-color prints and
+        # the typical workflow with this tool (a multi-filament plate).
+        self._finish_var = tk.StringVar(value="flush")
         finish_extruded_rb = ttk.Radiobutton(
             finish_row,
             text="Extruded",
@@ -326,9 +346,9 @@ class _SettingsApp(ttk.Frame):
         )
         _add_tooltip(
             finish_flush_rb,
-            "Features live inside the plate's top slab; the plate is still a "
-            "solid box. Ideal for two-color prints where the QR is a flat "
-            "color change on the top surface.",
+            "Default. Features live inside the plate's top slab; the plate "
+            "is still a solid box. Ideal for two-color prints where the QR "
+            "is a flat color change on the top surface.",
         )
         _add_tooltip(
             finish_sunken_rb,
@@ -568,7 +588,10 @@ class _SettingsApp(ttk.Frame):
         # --- Footer ----------------------------------------------------------
         footer = ttk.Frame(self)
         footer.pack(fill=tk.X, pady=(12, 0))
-        self._status_var = tk.StringVar(value="Ready.")
+        # The initial status line is the running qr23mf version; later
+        # workflow events ("Previewing: ...", "Update check failed.", etc.)
+        # overwrite it.
+        self._status_var = tk.StringVar(value=f"qr23mf {__version__}")
         ttk.Label(footer, textvariable=self._status_var).pack(side=tk.LEFT)
         preview_btn = ttk.Button(footer, text="Preview", command=self._on_preview)
         preview_btn.pack(side=tk.RIGHT)
