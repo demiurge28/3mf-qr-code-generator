@@ -6,6 +6,10 @@
 
 ## Quick start
 
+`qr23mf gui` runs on **macOS**, **Linux**, and **Windows**. Pick the installer for your OS.
+
+### macOS / Linux
+
 ```bash
 git clone https://github.com/demiurge28/3mf-qr-code-generator.git
 cd 3mf-qr-code-generator
@@ -13,11 +17,39 @@ cd 3mf-qr-code-generator
 qr23mf gui
 ```
 
-That's it — the installer picks your Python 3.11+ interpreter, chooses `uv` (preferred) or `pipx`, installs qr23mf as a user-level tool, and makes sure Tkinter is available for the GUI.
+`install.sh` picks a Python 3.11+ interpreter (probing `python3.13` / `python3.12` / `python3.11` by name so Homebrew's Python is found even when Apple's older `/usr/bin/python3` sits earlier on `PATH`), chooses `uv` (preferred) or `pipx`, installs qr23mf as a user-level tool, and installs Tk bindings when missing:
 
-Installer flags: `--noninteractive`, `--skip-tk`, `--tool=uv|pipx`, `--help`.
+- macOS: `brew install python-tk@3.11` (offered interactively).
+- Debian / Ubuntu: `sudo apt-get install python3-tk`.
+- Fedora / RHEL: `sudo dnf install python3-tkinter`.
+- Arch: `sudo pacman -S tk`.
 
-If `qr23mf gui` reports `Tkinter is not available`, see [macOS / Homebrew note](#macos--homebrew-note) below.
+Flags: `--noninteractive`, `--skip-tk`, `--tool=uv|pipx`, `--help`.
+
+### Windows
+
+Open **PowerShell** in the directory where you want the repo, then:
+
+```powershell
+git clone https://github.com/demiurge28/3mf-qr-code-generator.git
+cd 3mf-qr-code-generator
+pwsh -ExecutionPolicy Bypass -File .\install.ps1
+qr23mf gui
+```
+
+(If you're on stock Windows PowerShell 5.1, use `powershell` in place of `pwsh`.)
+
+`install.ps1` probes `py -3.13` / `py -3.12` / `py -3.11` / `python` / `python3` for a Python 3.11+ interpreter, picks `uv` (preferred) or `pipx`, and offers to install `uv` via the official Astral installer if neither is on `PATH`. Tkinter ships with the python.org Windows installer by default, so there is no extra Tk step unless you installed Python without the **tcl/tk and IDLE** optional feature (re-run the installer to enable it).
+
+Flags: `-NonInteractive`, `-SkipTk`, `-Tool uv|pipx`. If you see a *"running scripts is disabled on this system"* error, either keep the `-ExecutionPolicy Bypass` prefix above or run `Set-ExecutionPolicy -Scope Process Bypass` once in the current session.
+
+### After installing
+
+- `qr23mf gui` — launch the visual designer.
+- `qr23mf generate --text "https://example.com" --out coaster.3mf` — run the same pipeline from the CLI.
+- `qr23mf --version` — print the installed version.
+
+If `qr23mf` isn't on your `PATH` after install, run `uv tool update-shell` (uv) or `pipx ensurepath` (pipx) once and re-open your terminal. See [INSTALL.md](./INSTALL.md) for troubleshooting details.
 
 ## GUI (Tkinter)
 
@@ -63,15 +95,31 @@ Press **Preview** to open a 2D top-down preview with a one-line summary (plate d
 * **Back** — close the preview and return to the settings window.
 * **Create…** — opens a native save dialog and writes a **two-object 3MF** file. Inside the `.3mf`, the base is `objectid=1` and the QR + text features are `objectid=2`, so slicers like Bambu Studio, OrcaSlicer, and PrusaSlicer load them as two independently selectable bodies — assign a different filament to each for a two-color print. The `.3mf` suffix is appended automatically if the save dialog doesn't include one.
 
-### macOS / Homebrew note
+### If `qr23mf gui` reports `Tkinter is not available`
 
-Homebrew's Python 3.11 ships without Tk bindings by default. If `qr23mf gui` reports `Tkinter is not available`, install the matching Tk package:
+The GUI is pure Tkinter and runs on macOS, Linux, and Windows, but a few Python distributions ship without Tk bindings. Install them for your platform and re-run the installer:
 
-```bash
-brew install python-tk@3.11
-```
-
-Then re-run `./install.sh` (or `uv sync --all-extras`) so the virtual environment picks up the refreshed interpreter.
+- **macOS** (Homebrew Python 3.11):
+    ```bash
+    brew install python-tk@3.11
+    ./install.sh
+    ```
+- **Debian / Ubuntu**:
+    ```bash
+    sudo apt-get install python3-tk
+    ./install.sh
+    ```
+- **Fedora / RHEL**:
+    ```bash
+    sudo dnf install python3-tkinter
+    ./install.sh
+    ```
+- **Arch**:
+    ```bash
+    sudo pacman -S tk
+    ./install.sh
+    ```
+- **Windows**: re-run the python.org installer and enable the **tcl/tk and IDLE** optional feature, then re-run `install.ps1`.
 
 ## CLI (power users)
 

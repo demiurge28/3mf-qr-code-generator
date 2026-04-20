@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 import math
+import sys
 import tkinter as tk
 import urllib.error
 import urllib.request
@@ -1551,6 +1552,10 @@ class _Tooltip:
     _FILL: str = "#ffffe0"
     _OUTLINE: str = "#808080"
     _TEXT_FG: str = "#222"
+    # Windows-only: a distinctive color that won't appear elsewhere in the
+    # tooltip; pixels of exactly this color are rendered fully transparent
+    # by 'wm_attributes("-transparentcolor", ...)'.
+    _WIN_TRANSPARENT_KEY: str = "#FF00FE"
 
     def __init__(self, widget: tk.Widget, text: str) -> None:
         self.widget = widget
@@ -1589,11 +1594,6 @@ class _Tooltip:
 
         tip = tk.Toplevel(self.widget)
         tip.wm_overrideredirect(True)
-        # Ask the window manager for a truly transparent Toplevel so the
-        # corners outside the pill are see-through. macOS honors this via
-        # '-transparent'; other platforms silently ignore it.
-        with contextlib.suppress(tk.TclError):
-            tip.wm_attributes("-transparent", True)
 
         # Measure the wrapped text using a throw-away Label so the canvas
         # can be sized exactly to the pill's footprint.
@@ -1609,19 +1609,35 @@ class _Tooltip:
         # are perfect semicircles (matches the example mockup).
         radius = canvas_h / 2.0
 
-        # Attempt a transparent canvas background on platforms that
-        # support the 'systemTransparent' color (macOS). On everything
-        # else fall back to the pill fill, which still renders as a
-        # solid rounded rectangle.
+        # Request the cleanest available per-pixel transparency so the
+        # corners outside the pill are see-through.
+        #
+        # * macOS  — 'wm_attributes("-transparent", True)' + a canvas
+        #   background of 'systemTransparent' (the Aqua system color).
+        # * Windows — 'wm_attributes("-transparentcolor", <color>)' makes
+        #   every pixel of that exact color fully transparent; we use a
+        #   distinctive key color as the canvas background.
+        # * Linux (X11 / Wayland) — no portable transparency in Tk; the
+        #   canvas falls back to the pill fill color, which still renders
+        #   as a solid rounded rectangle (just with a visible rectangular
+        #   corner area around the pill).
         canvas_bg = self._FILL
-        try:
-            # Probe whether systemTransparent is a valid color in this Tk
-            # build by trying to apply it; roll back on TclError.
-            probe = tk.Canvas(tip, bg="systemTransparent")
-            probe.destroy()
-            canvas_bg = "systemTransparent"
-        except tk.TclError:
-            pass
+        if sys.platform == "darwin":
+            with contextlib.suppress(tk.TclError):
+                tip.wm_attributes("-transparent", True)
+            try:
+                probe = tk.Canvas(tip, bg="systemTransparent")
+                probe.destroy()
+                canvas_bg = "systemTransparent"
+            except tk.TclError:
+                pass
+        elif sys.platform.startswith("win"):
+            transparent_key = self._WIN_TRANSPARENT_KEY
+            try:
+                tip.wm_attributes("-transparentcolor", transparent_key)
+                canvas_bg = transparent_key
+            except tk.TclError:
+                pass
 
         canvas = tk.Canvas(
             tip,
