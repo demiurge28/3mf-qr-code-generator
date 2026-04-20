@@ -2,7 +2,7 @@
 
 `qr23mf` — turn a string or URL into a 3D-printable QR code as a **two-object 3MF** (base plate + QR / text features) that any modern slicer imports as two independently selectable bodies. Built as a small, pure-Python CLI + Tkinter GUI.
 
-> **Status:** stable CLI + GUI. `qr23mf gui` opens the visual designer; `qr23mf generate --out plate.3mf` runs the same pipeline on the command line.
+> **Status:** stable CLI + GUI, cross-platform on macOS, Linux, and Windows. `qr23mf gui` opens the visual designer; `qr23mf generate --out plate.3mf` runs the same pipeline on the command line. Release announcements and Q&A live in [GitHub Discussions](https://github.com/demiurge28/3mf-qr-code-generator/discussions).
 
 ## Quick start
 
@@ -170,7 +170,7 @@ The resulting `.3mf` is a standard ZIP package with two `<object>` entries in `3
 | `--size` | `60.0` | Base plate side length in millimeters (plate is square). |
 | `--base-height` | `2.0` | Base plate thickness in millimeters. |
 | `--pixel-height` | `1.0` | Extrusion height of the dark QR modules above the base's top face. |
-| `--ec` | `M` | QR error-correction level. One of `L`, `M`, `Q`, `H` (case-insensitive). Higher levels tolerate more damage but require a larger QR version. |
+| `--ec` | `M` *(default)* | QR error-correction level. One of `L` (~7%), `M` (~15%, default), `Q` (~25%), `H` (~30%) damage tolerance (case-insensitive). Higher levels tolerate more damage but require a larger QR version. |
 | `--quiet-zone` | `4` | Quiet-zone margin expressed in module units. The QR specification recommends 4. |
 
 ### Exit codes
