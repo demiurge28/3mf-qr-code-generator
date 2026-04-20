@@ -144,29 +144,22 @@ class _SettingsApp(ttk.Frame):
         )
         ec_label = ttk.Label(text_row, text="EC (default M):")
         ec_label.pack(side=tk.LEFT, padx=(12, 4))
-        self._ec_var = tk.StringVar(value="M")
+        # The combobox DISPLAYS strings like 'L' / 'M (default)' / 'Q' / 'H'
+        # so the user can see which level is the default, but the variable
+        # holds whichever string the user picked. _gather_design() parses
+        # the first alpha character when it needs the canonical single-
+        # letter form, so display strings with suffixes round-trip
+        # correctly without any normalization trace (which previously
+        # stripped the ' (default)' hint on every selection).
+        self._ec_var = tk.StringVar(value="M (default)")
         ec_combo = ttk.Combobox(
             text_row,
             textvariable=self._ec_var,
-            width=4,
+            width=12,
             values=["L", "M (default)", "Q", "H"],
             state="readonly",
         )
         ec_combo.pack(side=tk.LEFT)
-        # Keep the internal var as a pure one-letter level while showing
-        # the 'M (default)' string in the Combobox list. A trace maps
-        # selections back to the canonical single-letter form.
-        ec_combo.set("M (default)")
-
-        def _normalize_ec(*_args: object) -> None:
-            raw = self._ec_var.get().strip()
-            # 'M (default)' -> 'M'; 'L' / 'Q' / 'H' -> unchanged.
-            if raw.startswith("M") and raw != "M":
-                self._ec_var.set("M")
-            elif raw and raw[0] in ("L", "Q", "H") and raw != raw[0]:
-                self._ec_var.set(raw[0])
-
-        self._ec_var.trace_add("write", _normalize_ec)
         _add_tooltip(
             ec_label,
             "Error-correction level. L \u224807%, M \u224815%, Q \u224825%, "
@@ -1230,17 +1223,21 @@ class _SettingsApp(ttk.Frame):
             messagebox.showerror("Invalid input", "Payload text must not be empty.")
             return None
 
-        ec_raw = self._ec_var.get().upper()
-        if ec_raw not in ("L", "M", "Q", "H"):
-            messagebox.showerror("Invalid input", f"Unknown EC level {ec_raw!r}.")
+        # Accept any display string that starts with a valid EC level
+        # letter, so values like 'M (default)' round-trip from the
+        # Combobox without complaint.
+        ec_display = self._ec_var.get().strip().upper()
+        ec_first = ec_display[:1]
+        if ec_first not in ("L", "M", "Q", "H"):
+            messagebox.showerror("Invalid input", f"Unknown EC level {self._ec_var.get()!r}.")
             return None
         # Narrow the literal for mypy.
         ec: EcLevel
-        if ec_raw == "L":
+        if ec_first == "L":
             ec = "L"
-        elif ec_raw == "M":
+        elif ec_first == "M":
             ec = "M"
-        elif ec_raw == "Q":
+        elif ec_first == "Q":
             ec = "Q"
         else:
             ec = "H"
