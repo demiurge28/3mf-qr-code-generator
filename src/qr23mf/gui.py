@@ -4,11 +4,13 @@ Launches a two-window configurator:
 
 * **Settings window** — payload text, EC level, base-plate size
   (width / depth / thickness), QR size and X/Y offset on the plate, module
-  style (squares or dots), and a text-label list with per-label content /
-  position / height / extrusion.
+  style (squares or dots), a text-label list with per-label content /
+  position / height / extrusion, and an output-format toggle that picks
+  between a 3D-printable 3MF and a 2D laser-etch SVG on **Create**.
 * **Preview window** — 2D top-down rendering of the plate, QR modules, and
-  text labels plus a **Create\u2026** button that writes a binary STL via
-  :mod:`qr23mf.writers.stl`.
+  text labels plus a **Create\u2026** button that writes either a two-object
+  3MF (via :mod:`qr23mf.writers.threemf`) or a 2D SVG (via
+  :mod:`qr23mf.writers.svg`) depending on the output-format selection.
 
 This module imports :mod:`tkinter` at the top level, so the CLI must
 lazy-import ``qr23mf.gui`` — that way ``qr23mf`` itself stays importable on
@@ -29,6 +31,7 @@ import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Literal
 
 import numpy as np
 from stl.mesh import Mesh
@@ -43,7 +46,12 @@ from qr23mf.geometry import (
     build_meshes,
 )
 from qr23mf.qr import EcLevel, QrMatrix, build_matrix
+from qr23mf.writers.svg import write_svg
 from qr23mf.writers.threemf import write_3mf
+
+#: Internal output-format identifiers. Kept as plain strings so the
+#: ``tk.StringVar`` round-trips cleanly and mypy can narrow them.
+_OutputFormat = Literal["threemf", "svg"]
 
 __all__ = ["run"]
 
@@ -121,6 +129,11 @@ class _SettingsApp(ttk.Frame):
         self._snap_var = tk.BooleanVar(value=False)
         self._spacing_var = tk.BooleanVar(value=False)
         self._grid_size_var = tk.IntVar(value=_GRID_SPACING_DEFAULT_MM)
+        # Output format toggle: drives whether "Create\u2026" in the preview
+        # window writes a 3D-printable 3MF or a 2D laser-etch SVG. Holds the
+        # raw values "threemf" or "svg"; _output_format() narrows to the
+        # Literal type for mypy.
+        self._output_var = tk.StringVar(value="threemf")
         self._build()
 
     def _build(self) -> None:
@@ -349,6 +362,49 @@ class _SettingsApp(ttk.Frame):
             "Features live inside the plate's top slab AND the base has "
             "matching pockets carved out, so the QR is visibly recessed even "
             "in a single-color print.",
+        )
+
+        # --- Output format --------------------------------------------------
+        # Picks whether "Create\u2026" in the preview window writes a
+        # 3D-printable two-object 3MF or a 2D SVG suitable for laser etching
+        # / engraving. All other settings (plate, QR, labels) are shared —
+        # only the Create action branches on this toggle.
+        output_row = ttk.Frame(qr)
+        output_row.pack(fill=tk.X, padx=6, pady=3)
+        output_label = ttk.Label(output_row, text="Output:")
+        output_label.pack(side=tk.LEFT)
+        output_threemf_rb = ttk.Radiobutton(
+            output_row,
+            text="3D print (3MF)",
+            variable=self._output_var,
+            value="threemf",
+        )
+        output_threemf_rb.pack(side=tk.LEFT, padx=(8, 6))
+        output_svg_rb = ttk.Radiobutton(
+            output_row,
+            text="Laser etch (SVG)",
+            variable=self._output_var,
+            value="svg",
+        )
+        output_svg_rb.pack(side=tk.LEFT)
+        _add_tooltip(
+            output_label,
+            "What the \u201cCreate\u2026\u201d button in the preview window "
+            "writes. Everything else on this screen — plate, QR, labels — is "
+            "shared; only the final save action changes.",
+        )
+        _add_tooltip(
+            output_threemf_rb,
+            "Write a two-object 3MF (base + features) for 3D printing. "
+            "Slicers like Bambu Studio / OrcaSlicer / PrusaSlicer load the "
+            "two objects as independently selectable bodies so you can "
+            "assign a different filament to each for a two-color print.",
+        )
+        _add_tooltip(
+            output_svg_rb,
+            "Write a 2D SVG with millimetre-accurate viewBox, ready to drop "
+            "into LightBurn / xTool Creative Space / LaserGRBL or any "
+            "vector editor for laser etching / engraving a flat plate.",
         )
 
         # --- Text labels (form on the left, interactive canvas on the right)
@@ -592,8 +648,9 @@ class _SettingsApp(ttk.Frame):
         _add_tooltip(
             preview_btn,
             "Build the full mesh with the current settings and open a 2D "
-            "top-down preview window. From there you can save the design as "
-            "a two-object 3MF.",
+            "top-down preview window. From there \u201cCreate\u2026\u201d saves "
+            "either a two-object 3MF or a laser-etch SVG, depending on the "
+            "Output toggle above.",
         )
         updates_btn = ttk.Button(
             footer,
@@ -1244,6 +1301,11 @@ class _SettingsApp(ttk.Frame):
 
         return params, placement, style, finish, tuple(self._labels), text, ec
 
+    def _output_format(self) -> _OutputFormat:
+        """Return the current output-format selection, narrowed for mypy."""
+        raw = self._output_var.get()
+        return "svg" if raw == "svg" else "threemf"
+
     def _on_preview(self) -> None:
         gathered = self._gather_design()
         if gathered is None:
@@ -1264,11 +1326,24 @@ class _SettingsApp(ttk.Frame):
             messagebox.showerror("Cannot build mesh", str(exc))
             return
 
+        output_format = self._output_format()
         self._status_var.set(
             f"Previewing: base={base.vectors.shape[0]} triangles, "
-            f"features={features.vectors.shape[0]} triangles (finish: {finish})."
+            f"features={features.vectors.shape[0]} triangles (finish: {finish}, "
+            f"output: {'SVG' if output_format == 'svg' else '3MF'})."
         )
-        _PreviewWindow(self, params, placement, style, finish, labels, matrix, base, features)
+        _PreviewWindow(
+            self,
+            params,
+            placement,
+            style,
+            finish,
+            labels,
+            matrix,
+            base,
+            features,
+            output_format,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1290,6 +1365,7 @@ class _PreviewWindow(tk.Toplevel):
         matrix: QrMatrix,
         base: Mesh,
         features: Mesh,
+        output_format: _OutputFormat = "threemf",
     ) -> None:
         super().__init__(parent)
         self.title("Preview")
@@ -1301,6 +1377,7 @@ class _PreviewWindow(tk.Toplevel):
         self._matrix = matrix
         self._base = base
         self._features = features
+        self._output_format: _OutputFormat = output_format
 
         self._canvas = tk.Canvas(
             self,
@@ -1318,20 +1395,30 @@ class _PreviewWindow(tk.Toplevel):
             "window to go back and edit settings.",
         )
 
+        output_label = "SVG (laser etch)" if output_format == "svg" else "3MF (two-object)"
         summary = (
             f"Plate: {params.size_mm:g} x {params.effective_depth_mm:g} x "
             f"{params.base_height_mm:g} mm | Style: {style} | Finish: {finish} | "
             f"Text labels: {len(labels)} | "
             f"Triangles: base={base.vectors.shape[0]}, "
-            f"features={features.vectors.shape[0]}"
+            f"features={features.vectors.shape[0]} | "
+            f"Output: {output_label}"
         )
         ttk.Label(self, text=summary).pack(padx=12, anchor=tk.W)
-        ttk.Label(
-            self,
-            text=(
+        if output_format == "svg":
+            hint = (
+                "Create\u2026 writes a 2D SVG (mm-accurate viewBox) ready for "
+                "laser etching / engraving in LightBurn, xTool Creative Space, "
+                "LaserGRBL or any vector editor."
+            )
+        else:
+            hint = (
                 "Create\u2026 writes a two-object 3MF (base + features) so your "
                 "slicer can assign a different filament to each body."
-            ),
+            )
+        ttk.Label(
+            self,
+            text=hint,
             foreground="#555",
             wraplength=_CANVAS_PX + 80,
             justify=tk.LEFT,
@@ -1347,12 +1434,21 @@ class _PreviewWindow(tk.Toplevel):
         )
         create_btn = ttk.Button(buttons, text="Create\u2026", command=self._on_create)
         create_btn.pack(side=tk.RIGHT)
-        _add_tooltip(
-            create_btn,
-            "Open a save dialog and write a two-object 3MF (base + features). "
-            "Slicers load the two objects as independently selectable bodies "
-            "so you can assign a different filament to each.",
-        )
+        if output_format == "svg":
+            _add_tooltip(
+                create_btn,
+                "Open a save dialog and write a 2D SVG of the plate, QR "
+                "modules and any text labels in millimetre units — ready to "
+                "import into LightBurn / xTool Creative Space / any vector "
+                "editor for laser etching / engraving.",
+            )
+        else:
+            _add_tooltip(
+                create_btn,
+                "Open a save dialog and write a two-object 3MF (base + features). "
+                "Slicers load the two objects as independently selectable bodies "
+                "so you can assign a different filament to each.",
+            )
 
         self._draw_preview()
         self.transient(parent.winfo_toplevel())
@@ -1418,6 +1514,12 @@ class _PreviewWindow(tk.Toplevel):
             )
 
     def _on_create(self) -> None:
+        if self._output_format == "svg":
+            self._create_svg()
+        else:
+            self._create_threemf()
+
+    def _create_threemf(self) -> None:
         out = filedialog.asksaveasfilename(
             parent=self,
             title="Save 3MF",
@@ -1430,6 +1532,29 @@ class _PreviewWindow(tk.Toplevel):
             written = write_3mf(self._base, self._features, Path(out))
         except OSError as exc:
             messagebox.showerror("Write failed", f"Could not write 3MF: {exc}")
+            return
+        messagebox.showinfo("Saved", f"Wrote {written}")
+
+    def _create_svg(self) -> None:
+        out = filedialog.asksaveasfilename(
+            parent=self,
+            title="Save SVG",
+            defaultextension=".svg",
+            filetypes=[("SVG (laser etch)", "*.svg"), ("All files", "*.*")],
+        )
+        if not out:
+            return
+        try:
+            written = write_svg(
+                self._matrix,
+                self._params,
+                Path(out),
+                placement=self._placement,
+                module_style=self._style,
+                text_labels=self._labels,
+            )
+        except (ValueError, OSError) as exc:
+            messagebox.showerror("Write failed", f"Could not write SVG: {exc}")
             return
         messagebox.showinfo("Saved", f"Wrote {written}")
 

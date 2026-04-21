@@ -67,6 +67,7 @@ Opens a Tkinter configurator with a **Settings** window (the main designer) and 
 * **QR code** size and X / Y offset on the plate (`0 mm size` = auto-fit); module extrusion; quiet-zone margin.
 * **Module style**: **Squares** (axis-aligned boxes) or **Dots** (cylindrical prisms).
 * **Finish**: **Extruded** (raised above the plate), **Flush** (default — pixels embedded in the plate top slab), or **Sunken** (pixels occupy the top slab *and* the base has matching pockets carved into its top face, so the QR is visibly recessed even in single-color prints). Text labels mirror this selection.
+* **Output**: **3D print (3MF)** (default — two-object 3MF for slicers) or **Laser etch (SVG)** (2D SVG with mm-accurate viewBox for LightBurn / xTool / any vector editor). The **Create\u2026** button in the preview window writes whichever format is selected.
 * **Text labels** — add, update, remove, or **Remove all**; each label has its own text, X / Y position, height, and extrusion.
 * **Check for updates** button — queries the public GitHub Releases API (5 s timeout) and shows "No New Updates" when current, or offers to open the Releases page in your browser when a newer tag is available.
 
@@ -91,10 +92,12 @@ Every interactive element has a pill-shaped hover tooltip with a short plain-lan
 
 ### Preview window
 
-Press **Preview** to open a 2D top-down preview with a one-line summary (plate dims, style, finish, label count, triangle counts):
+Press **Preview** to open a 2D top-down preview with a one-line summary (plate dims, style, finish, label count, triangle counts, selected output format):
 
 * **Back** — close the preview and return to the settings window.
-* **Create…** — opens a native save dialog and writes a **two-object 3MF** file. Inside the `.3mf`, the base is `objectid=1` and the QR + text features are `objectid=2`, so slicers like Bambu Studio, OrcaSlicer, and PrusaSlicer load them as two independently selectable bodies — assign a different filament to each for a two-color print. The `.3mf` suffix is appended automatically if the save dialog doesn't include one.
+* **Create…** — opens a native save dialog. What gets written depends on the **Output** toggle back on the settings window:
+  * **3D print (3MF)** (default) — writes a **two-object 3MF** file. Inside the `.3mf`, the base is `objectid=1` and the QR + text features are `objectid=2`, so slicers like Bambu Studio, OrcaSlicer, and PrusaSlicer load them as two independently selectable bodies — assign a different filament to each for a two-color print. The `.3mf` suffix is appended automatically.
+  * **Laser etch (SVG)** — writes a 2D SVG with millimetre-accurate `width` / `height` / `viewBox`, ready to drop into LightBurn, xTool Creative Space, LaserGRBL, or any vector editor for laser etching / engraving a flat plate. The `.svg` suffix is appended automatically.
 
 ### If `qr23mf gui` reports `Tkinter is not available`
 
