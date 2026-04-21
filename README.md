@@ -47,6 +47,7 @@ Flags: `-NonInteractive`, `-SkipTk`, `-Tool uv|pipx`. If you see a *"running scr
 
 - `qr23mf gui` — launch the visual designer.
 - `qr23mf generate --text "https://example.com" --out coaster.3mf` — run the same pipeline from the CLI.
+- `qr23mf svg --text "https://example.com" --out coaster.svg` — export a 2D SVG for laser etching / engraving.
 - `qr23mf --version` — print the installed version.
 
 If `qr23mf` isn't on your `PATH` after install, run `uv tool update-shell` (uv) or `pipx ensurepath` (pipx) once and re-open your terminal. See [INSTALL.md](./INSTALL.md) for troubleshooting details.
@@ -189,6 +190,45 @@ Meshes are produced in millimeter units and positioned so the base plate's botto
 
 * `--base-color` / `--pixel-color` CLI flags to stamp color metadata into the 3MF (today the two objects are material-less; color/filament is assigned in the slicer).
 * Batch mode, preset profiles, embossed vs debossed, logo overlay — later scopes tracked in `vbrief/proposed/`.
+
+## SVG export (laser etching)
+
+The `svg` subcommand emits a 2D SVG of the same QR geometry in millimeter units — ready to drop into LightBurn, xTool Creative Space, LaserGRBL, or any vector editor.
+
+```bash
+# Minimum: write a 60 mm × 60 mm SVG of the QR code
+qr23mf svg --text "https://example.com" --out coaster.svg
+
+# Dot-style modules with a white plate background and per-feature layer groups
+qr23mf svg \
+  --text "https://example.com" \
+  --out engrave.svg \
+  --module-style dot \
+  --background "#ffffff" \
+  --layer-per-feature
+```
+
+The SVG has `width`/`height` in `mm` and a `viewBox` in plate millimeters, so importing it into laser software preserves dimensions without rescaling.
+
+### SVG flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--text`, `-t` | _(required)_ | Payload to encode. |
+| `--out`, `-o` | _(required)_ | Output path. The `.svg` suffix is appended if missing; parent directories are created. |
+| `--size` | `60.0` | Plate side length in millimeters. |
+| `--ec` | `M` | QR error-correction level: `L`, `M`, `Q`, `H` (case-insensitive). |
+| `--quiet-zone` | `4` | Quiet-zone margin in module units. |
+| `--module-style` | `square` | `square` emits one `<rect>` per dark module; `dot` emits one `<circle>`. |
+| `--fill` | `#000000` | QR module fill color (any CSS color). |
+| `--stroke` | _unset_ | Optional stroke color on each module. |
+| `--background` | _unset_ | Plate-footprint `<rect>` fill color. Omit for a transparent background. |
+| `--background-stroke` | _unset_ | Optional stroke on the plate rectangle. |
+| `--layer-per-feature` | off | Wraps the plate and the QR in separate `<g>` layer groups so LightBurn imports them as assignable layers. |
+
+### Exit codes
+
+Same as `generate`: `0` on success, `2` on validation errors (unknown EC / module style, empty text, plate too small), `3` on I/O errors.
 
 ## Alternative install paths
 

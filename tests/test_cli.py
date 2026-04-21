@@ -140,6 +140,95 @@ def test_generate_appends_3mf_suffix_when_missing(tmp_path: Path) -> None:
     assert not (tmp_path / "coaster.stl").exists()
 
 
+# --- svg subcommand -----------------------------------------------------------
+
+
+def test_svg_help_lists_key_flags() -> None:
+    result = runner.invoke(app, ["svg", "--help"], env=_WIDE_PLAIN_ENV)
+    assert result.exit_code == 0
+    plain = _plain(result.stdout)
+    for flag in (
+        "--text",
+        "--out",
+        "--size",
+        "--ec",
+        "--quiet-zone",
+        "--module-style",
+        "--fill",
+        "--stroke",
+        "--background",
+        "--layer-per-feature",
+    ):
+        assert flag in plain, f"{flag!r} missing from svg help:\n{plain}"
+
+
+def test_svg_writes_valid_svg_with_mm_units(tmp_path: Path) -> None:
+    out = tmp_path / "coaster.svg"
+    result = runner.invoke(app, ["svg", "--text", "https://example.com", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    content = out.read_text(encoding="utf-8")
+    assert content.startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    assert 'width="60mm"' in content
+    assert 'height="60mm"' in content
+    assert 'viewBox="0 0 60 60"' in content
+    assert f"Wrote {out}" in result.stdout
+
+
+def test_svg_appends_suffix_when_missing(tmp_path: Path) -> None:
+    out = tmp_path / "laser"  # no suffix
+    result = runner.invoke(app, ["svg", "--text", "hi", "--out", str(out)])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "laser.svg").exists()
+
+
+def test_svg_rejects_invalid_ec_with_exit_code_2(tmp_path: Path) -> None:
+    out = tmp_path / "bad.svg"
+    result = runner.invoke(app, ["svg", "--text", "hi", "--ec", "X", "--out", str(out)])
+    assert result.exit_code == 2
+    assert "--ec" in result.output
+
+
+def test_svg_rejects_invalid_module_style_with_exit_code_2(tmp_path: Path) -> None:
+    out = tmp_path / "bad.svg"
+    result = runner.invoke(
+        app,
+        [
+            "svg",
+            "--text",
+            "hi",
+            "--module-style",
+            "triangle",
+            "--out",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--module-style" in result.output
+
+
+def test_svg_dot_style_emits_circles(tmp_path: Path) -> None:
+    out = tmp_path / "dots.svg"
+    result = runner.invoke(
+        app,
+        ["svg", "--text", "hi", "--module-style", "dot", "--out", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "<circle" in out.read_text(encoding="utf-8")
+
+
+def test_svg_background_adds_plate_rect(tmp_path: Path) -> None:
+    out = tmp_path / "plate.svg"
+    result = runner.invoke(
+        app,
+        ["svg", "--text", "hi", "--background", "white", "--out", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    content = out.read_text(encoding="utf-8")
+    # A plate-footprint <rect> is the first rect, filled 'white'.
+    assert 'fill="white"' in content
+
+
 # --- gui subcommand -----------------------------------------------------------
 
 

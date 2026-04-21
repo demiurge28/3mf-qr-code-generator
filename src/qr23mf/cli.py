@@ -17,6 +17,7 @@ import typer
 from qr23mf import __version__
 from qr23mf.geometry import GeometryParams, build_meshes
 from qr23mf.qr import EcLevel, build_matrix
+from qr23mf.writers.svg import write_svg
 from qr23mf.writers.threemf import write_3mf
 
 app = typer.Typer(
@@ -172,6 +173,154 @@ def generate(
             typer.secho(f"Error writing {out}: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=3) from exc
         typer.echo(f"Wrote {out_path}")
+
+
+@app.command()
+def svg(
+    text: Annotated[
+        str,
+        typer.Option(
+            "--text",
+            "-t",
+            help="Payload to encode (string or URL). Must be non-empty.",
+        ),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            "-o",
+            help=(
+                "Output path for the SVG. The .svg suffix is appended if "
+                "missing. Parent directories are created automatically."
+            ),
+        ),
+    ],
+    size_mm: Annotated[
+        float,
+        typer.Option("--size", help="Plate side length in millimetres (plate is square)."),
+    ] = 60.0,
+    ec: Annotated[
+        str,
+        typer.Option("--ec", help="QR error-correction level. One of L, M, Q, H."),
+    ] = "M",
+    quiet_zone_modules: Annotated[
+        int,
+        typer.Option(
+            "--quiet-zone",
+            help="Quiet-zone margin in module units (QR spec recommends 4).",
+        ),
+    ] = 4,
+    module_style: Annotated[
+        str,
+        typer.Option(
+            "--module-style",
+            help="How each dark module is drawn: 'square' (default) or 'dot'.",
+        ),
+    ] = "square",
+    fill: Annotated[
+        str,
+        typer.Option(
+            "--fill",
+            help="SVG fill color for the QR modules (CSS color, default black).",
+        ),
+    ] = "#000000",
+    stroke: Annotated[
+        str | None,
+        typer.Option(
+            "--stroke",
+            help="Optional SVG stroke color for the QR modules.",
+        ),
+    ] = None,
+    background: Annotated[
+        str | None,
+        typer.Option(
+            "--background",
+            help=(
+                "Optional plate-footprint fill color. When set, a "
+                "<rect> covering the full plate is emitted underneath "
+                "the QR."
+            ),
+        ),
+    ] = None,
+    background_stroke: Annotated[
+        str | None,
+        typer.Option(
+            "--background-stroke",
+            help="Optional plate-footprint stroke color (e.g. for a cut layer).",
+        ),
+    ] = None,
+    layer_per_feature: Annotated[
+        bool,
+        typer.Option(
+            "--layer-per-feature",
+            help=(
+                "Wrap the plate footprint, QR modules, and each text "
+                "label in their own <g class=...> so laser software "
+                "imports them as independent layers."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Write a 2D SVG of the QR code for laser etching / engraving.
+
+    The SVG is emitted in millimetre units (``width="<N>mm"`` + matching
+    ``viewBox``) so it imports at real-world size in Inkscape, Illustrator,
+    and LightBurn. The same geometry math powers both ``generate`` (3MF)
+    and ``svg``, so dimensions match exactly between the two outputs.
+    """
+    ec_upper = ec.upper()
+    if ec_upper not in _EC_CHOICES:
+        typer.secho(
+            f"Error: --ec must be one of {', '.join(_EC_CHOICES)} (got {ec!r}).",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    style_lower = module_style.lower()
+    if style_lower not in {"square", "dot"}:
+        typer.secho(
+            f"Error: --module-style must be 'square' or 'dot' (got {module_style!r}).",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        matrix = build_matrix(text, ec=ec_upper)  # type: ignore[arg-type]
+        params = GeometryParams(
+            size_mm=size_mm,
+            # base_height / pixel_height are irrelevant for SVG output but
+            # GeometryParams still validates them as positive, so seed the
+            # defaults to satisfy the dataclass.
+            base_height_mm=2.0,
+            pixel_height_mm=1.0,
+            quiet_zone_modules=quiet_zone_modules,
+        )
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        out_path = write_svg(
+            matrix,
+            params,
+            out,
+            module_style=style_lower,  # type: ignore[arg-type]
+            fill=fill,
+            stroke=stroke,
+            plate_fill=background,
+            plate_stroke=background_stroke,
+            layer_per_feature=layer_per_feature,
+        )
+    except ValueError as exc:
+        typer.secho(f"Error: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=2) from exc
+    except OSError as exc:
+        typer.secho(f"Error writing {out}: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=3) from exc
+    typer.echo(f"Wrote {out_path}")
 
 
 @app.command()
