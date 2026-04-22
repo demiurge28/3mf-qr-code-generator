@@ -23,7 +23,11 @@ from __future__ import annotations
 import contextlib
 import json
 import math
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import tkinter as tk
 import urllib.error
 import urllib.request
@@ -91,6 +95,9 @@ _UPDATE_CHECK_URL: str = (
     "https://api.github.com/repos/demiurge28/3mf-qr-code-generator/releases/latest"
 )
 _UPDATE_RELEASES_HTML_URL: str = "https://github.com/demiurge28/3mf-qr-code-generator/releases"
+# Base ``https`` URL to the repo for ``git+...@<tag>`` installs. The leading
+# ``git+`` is added at install time so the bare https URL stays reusable.
+_UPDATE_GIT_URL: str = "https://github.com/demiurge28/3mf-qr-code-generator.git"
 _UPDATE_CHECK_TIMEOUT_SEC: float = 5.0
 
 
@@ -786,8 +793,10 @@ class _SettingsApp(ttk.Frame):
         _add_tooltip(
             updates_btn,
             "Query GitHub for a newer qr23mf release (5 s timeout, no login "
-            'required). Shows "No New Updates" when current, or offers to '
-            "open the Releases page in your browser.",
+            'required). Shows "No New Updates" when current; when a newer '
+            "release is available, confirming the prompt opens a terminal "
+            "that runs the update automatically (uv tool install --force, "
+            "falling back to pipx).",
         )
 
     # --- Label list handlers -------------------------------------------------
@@ -1341,12 +1350,33 @@ class _SettingsApp(ttk.Frame):
             return
 
         self._status_var.set(f"Update available: {latest}.")
-        if messagebox.askyesno(
+        if not messagebox.askyesno(
             "Update available",
             f"qr23mf {latest} is available (you have {__version__}).\n\n"
-            "Open the releases page in your browser?",
+            "A terminal window will open and run the update automatically "
+            "(uv tool install --force …, falling back to pipx). Continue?",
         ):
-            webbrowser.open(_UPDATE_RELEASES_HTML_URL)
+            return
+
+        launched = _spawn_update_terminal(latest)
+        if launched:
+            self._status_var.set(
+                f"Update terminal opened for {latest}. "
+                "Close this GUI and re-launch it after the terminal finishes."
+            )
+            return
+
+        # Couldn't spawn a terminal (unknown platform, missing emulator,
+        # locked-down sandbox). Fall back to the old behaviour so the user
+        # still has a path forward.
+        self._status_var.set("Could not open an update terminal; opening releases page instead.")
+        messagebox.showwarning(
+            "Update terminal unavailable",
+            "Could not open a terminal window to run the update. The releases "
+            "page will open in your browser instead — grab the install command "
+            "from there.",
+        )
+        webbrowser.open(_UPDATE_RELEASES_HTML_URL)
 
     # --- Preview flow --------------------------------------------------------
 
@@ -2042,3 +2072,149 @@ def _is_newer(latest_tag: str, current: str) -> bool:
     if not latest_tuple or not current_tuple:
         return latest_tag != current
     return latest_tuple > current_tuple
+
+
+def _spawn_update_terminal(tag: str) -> bool:
+    """Open a platform-appropriate terminal window that auto-runs the update.
+
+    The child terminal invokes a throwaway script that tries ``uv tool install
+    --force`` first and falls back to ``pipx install --force``, targeting
+    ``git+_UPDATE_GIT_URL@<tag>`` so the user gets the exact release they saw
+    in the GUI — not whatever a pypi mirror happens to have. The window stays
+    open after install so the user can read output and decide when to close it.
+
+    Returns ``True`` if a terminal window was launched, ``False`` otherwise.
+    Callers should fall back to opening the Releases page in a browser.
+    """
+    script_path = _write_update_script(tag)
+    if script_path is None:
+        return False
+
+    try:
+        if sys.platform == "darwin":
+            # Terminal.app via AppleScript. "do script" opens a new window
+            # and runs the given command; "activate" pulls it to the front.
+            osa = (
+                f'tell application "Terminal" to do script "{script_path}"\n'
+                'tell application "Terminal" to activate'
+            )
+            subprocess.Popen(["osascript", "-e", osa])
+            return True
+        if sys.platform.startswith("win"):
+            # ``start`` detaches a new console; ``cmd /k`` keeps it open so
+            # the user sees the output after install finishes.
+            subprocess.Popen(
+                ["cmd.exe", "/c", "start", "", "cmd.exe", "/k", script_path],
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+            )
+            return True
+        # Linux / other Unix: try common terminal emulators in order of
+        # prevalence. ``x-terminal-emulator`` is the Debian-style alternatives
+        # wrapper that points at whatever the user picked as default.
+        for term in (
+            "x-terminal-emulator",
+            "gnome-terminal",
+            "konsole",
+            "xfce4-terminal",
+            "mate-terminal",
+            "alacritty",
+            "kitty",
+            "xterm",
+        ):
+            if shutil.which(term) is None:
+                continue
+            try:
+                if term == "gnome-terminal":
+                    subprocess.Popen([term, "--", "bash", script_path])
+                else:
+                    subprocess.Popen([term, "-e", f"bash {script_path}"])
+                return True
+            except OSError:
+                continue
+        return False
+    except OSError:
+        return False
+
+
+def _write_update_script(tag: str) -> str | None:
+    """Write an update helper script to a temp file and return its absolute path.
+
+    On POSIX the script is bash with executable permissions; on Windows it is
+    a ``.cmd`` batch file. Either one detects ``uv`` / ``pipx`` and installs
+    qr23mf from GitHub at ``tag``. Returns ``None`` if the temp file could not
+    be written, letting the caller fall back to opening the Releases page.
+    """
+    # Defensively sanitise the tag so a malformed GitHub response can't turn
+    # into shell metacharacters. Tag names in this repo are always of the form
+    # ``vMAJOR.MINOR.PATCH`` which is fully covered by this whitelist.
+    safe_tag = "".join(c for c in tag if c.isalnum() or c in ".-_+") or "latest"
+    git_spec = f"git+{_UPDATE_GIT_URL}@{safe_tag}"
+
+    try:
+        if sys.platform.startswith("win"):
+            body = (
+                "@echo off\r\n"
+                f"echo Updating qr23mf to {safe_tag}...\r\n"
+                "echo.\r\n"
+                "where uv >nul 2>nul\r\n"
+                "if %ERRORLEVEL%==0 (\r\n"
+                f'  uv tool install --force "{git_spec}"\r\n'
+                ") else (\r\n"
+                "  where pipx >nul 2>nul\r\n"
+                "  if %ERRORLEVEL%==0 (\r\n"
+                f'    pipx install --force "{git_spec}"\r\n'
+                "  ) else (\r\n"
+                "    echo ERROR: neither uv nor pipx is on PATH.\r\n"
+                "    echo Install uv from https://astral.sh/uv and re-run.\r\n"
+                "    pause\r\n"
+                "    exit /b 1\r\n"
+                "  )\r\n"
+                ")\r\n"
+                "echo.\r\n"
+                "qr23mf --version\r\n"
+                "echo.\r\n"
+                "echo Close any running qr23mf GUI and re-launch it to "
+                "pick up the new version.\r\n"
+                "pause\r\n"
+            )
+            suffix = ".cmd"
+        else:
+            body = (
+                "#!/usr/bin/env bash\n"
+                f"echo 'Updating qr23mf to {safe_tag}...'\n"
+                "echo\n"
+                "if command -v uv >/dev/null 2>&1; then\n"
+                f"  uv tool install --force '{git_spec}'\n"
+                "elif command -v pipx >/dev/null 2>&1; then\n"
+                f"  pipx install --force '{git_spec}'\n"
+                "else\n"
+                "  echo 'ERROR: neither uv nor pipx is on PATH.'\n"
+                "  echo 'Install uv:  curl -LsSf https://astral.sh/uv/install.sh | sh'\n"
+                "  echo 'Press Enter to close...'\n"
+                "  read _\n"
+                "  exit 1\n"
+                "fi\n"
+                "status=$?\n"
+                "echo\n"
+                'if [ "$status" -eq 0 ]; then\n'
+                "  qr23mf --version 2>/dev/null || "
+                "echo 'qr23mf not on PATH; open a new terminal to pick it up.'\n"
+                "  echo\n"
+                "  echo 'Close any running qr23mf GUI and re-launch it to "
+                "pick up the new version.'\n"
+                "else\n"
+                "  echo 'Update failed (exit status: '\"$status\"').'\n"
+                "fi\n"
+                "echo 'Press Enter to close this window...'\n"
+                "read _\n"
+            )
+            suffix = ".sh"
+
+        fd, path = tempfile.mkstemp(prefix="qr23mf-update-", suffix=suffix)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(body)
+        if not sys.platform.startswith("win"):
+            os.chmod(path, 0o755)
+        return path
+    except OSError:
+        return None
