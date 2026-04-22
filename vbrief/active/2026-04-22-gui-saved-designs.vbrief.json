@@ -4,12 +4,12 @@
     "author": "agent:oz",
     "description": "Tkinter GUI — JSON persistence for designs + recent-files menu",
     "created": "2026-04-22T17:15:00Z",
-    "updated": "2026-04-22T17:15:00Z"
+    "updated": "2026-04-22T17:18:00Z"
   },
   "plan": {
     "id": "gui-saved-designs",
     "title": "Saved designs — JSON persistence + recent-files menu",
-    "status": "proposed",
+    "status": "running",
     "tags": ["gui", "ux", "tkinter"],
     "narratives": {
       "Overview": "The qr23mf Tkinter GUI (src/qr23mf/gui.py) currently loses every setting the user enters as soon as the window closes — payload, EC level, plate dimensions, QR placement, module style, finish, output format, and every text label have to be re-entered on next launch. This brief adds a lightweight JSON save/load flow (File menu + keyboard shortcuts) plus a persistent recent-files list, so a frequent user can name and round-trip their designs and the GUI remembers the most recent 8 across sessions.",
