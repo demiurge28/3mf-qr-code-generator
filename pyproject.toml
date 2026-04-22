@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "3mf-qr-code-generator"
-version = "1.10.1"
+version = "1.11.0"
 description = "CLI + Tkinter GUI that turns a string/URL into a 3D-printable two-object 3MF (base + features) of a QR code."
 readme = "README.md"
 requires-python = ">=3.11"
