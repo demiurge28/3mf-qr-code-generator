@@ -1,0 +1,45 @@
+{
+  "vBRIEFInfo": {
+    "version": "0.5",
+    "author": "agent:oz",
+    "description": "Tkinter GUI — JSON persistence for designs + recent-files menu",
+    "created": "2026-04-22T17:15:00Z",
+    "updated": "2026-04-22T17:15:00Z"
+  },
+  "plan": {
+    "id": "gui-saved-designs",
+    "title": "Saved designs — JSON persistence + recent-files menu",
+    "status": "proposed",
+    "tags": ["gui", "ux", "tkinter"],
+    "narratives": {
+      "Overview": "The qr23mf Tkinter GUI (src/qr23mf/gui.py) currently loses every setting the user enters as soon as the window closes — payload, EC level, plate dimensions, QR placement, module style, finish, output format, and every text label have to be re-entered on next launch. This brief adds a lightweight JSON save/load flow (File menu + keyboard shortcuts) plus a persistent recent-files list, so a frequent user can name and round-trip their designs and the GUI remembers the most recent 8 across sessions.",
+      "Acceptance": "1) A new **File** menu is added to the root Tk window with entries: **New** (resets all fields to module defaults), **Open\u2026** (⌘O / Ctrl+O; asks for a .json path and loads every field), **Open Recent \u25b6** (submenu of up to 8 most-recently-used paths; selecting one loads it; each entry shows the basename tooltipped with the absolute path; a trailing **Clear Recent** entry empties the list), **Save** (⌘S / Ctrl+S; writes the current design to the current file path or falls back to Save As if none), **Save As\u2026** (asks for a .json path and writes). 2) A new module `src/qr23mf/design_io.py` exposes `Design` (dataclass mirroring `_gather_design`'s return fields plus output format), `design_to_dict(d) -> dict[str, object]`, `design_from_dict(d) -> Design`, `save_design(design, path)` and `load_design(path)`. The JSON schema is `{\"version\": 1, \"payload\": str, \"ec\": 'L'|'M'|'Q'|'H', \"plate\": {...}, \"qr\": {...}, \"module_style\": 'square'|'dot', \"finish\": 'extruded'|'flush'|'sunken', \"output\": 'threemf'|'svg', \"text_labels\": [{...}, ...]}` — unknown top-level keys are tolerated with a `warnings.warn` so future additive changes don't break older versions; missing keys fall back to module defaults. 3) A `Recents` helper (inside `design_io.py` or a sibling module) persists the recent list at `~/.config/qr23mf/recents.json` on POSIX and `%APPDATA%\\qr23mf\\recents.json` on Windows, MRU-ordered, capped at 8, deduplicated on `Path.resolve()`, missing paths pruned on load. 4) Error paths: invalid JSON, wrong types, missing required top-level keys, and unreadable file all surface via `messagebox.showerror` with a clear message and leave the current in-GUI state untouched. 5) The window title reflects the current file: `qr23mf \u2014 <basename>` when a path is loaded, `qr23mf \u2014 Untitled*` when there are unsaved changes against no file (or a modified file), trailing `*` indicating dirty state. 6) Tests under `tests/test_design_io.py` cover: JSON round-trip for an every-field-populated design, unknown-key tolerance, missing-key defaults, invalid JSON rejection, recents trimming to 8, recents path-normalisation (relative vs absolute collapse), and MRU ordering after repeated adds. 7) The gate stays green under `task check`; coverage on `design_io.py` \u226595%; `gui.py` stays excluded from coverage but the new File-menu wiring is smoke-tested headlessly (same pattern used by the auto-update terminal tests).",
+      "Scope": "New files: `src/qr23mf/design_io.py` (Design dataclass + JSON codec + Recents helper), `tests/test_design_io.py`. Edits: `src/qr23mf/gui.py` \u2014 build and attach a Tk menubar with **File** menu, wire actions to `design_io.save_design` / `load_design`, implement dirty-state tracking via `tk.StringVar` traces on every form variable, drive window title from (path, dirty) tuple. Non-goals: cloud sync, design templates / presets (tracked separately), auto-save, macOS-native Cocoa menu integration beyond the default Tk wrapping, undo/redo stack. These would each be follow-up briefs.",
+      "Traces": "FR-4 (sensible defaults \u2014 new designs start from module defaults), FR-5 (UX improvement to the GUI surface)."
+    },
+    "items": [],
+    "references": [
+      {
+        "type": "x-vbrief/context",
+        "uri": "../specification.vbrief.json",
+        "url": "../specification.vbrief.json",
+        "id": "qr23mf-specification",
+        "description": "Parent specification"
+      },
+      {
+        "type": "user-request",
+        "id": "oz-tkinter-ui-implementation-2026-04-22"
+      },
+      {
+        "type": "code",
+        "id": "src/qr23mf/gui.py",
+        "description": "Existing Tkinter GUI this brief extends"
+      },
+      {
+        "type": "code",
+        "id": "src/qr23mf/geometry.py",
+        "description": "Source of truth for Design field defaults (GeometryParams, QrPlacement, TextLabel)"
+      }
+    ]
+  }
+}
