@@ -21,6 +21,7 @@ by default; ``brew install python-tk@3.11`` provides it).
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import math
 import os
@@ -41,6 +42,7 @@ import numpy as np
 from stl.mesh import Mesh
 
 from qr23mf import __version__
+from qr23mf.design_io import Design, Recents, load_design, save_design
 from qr23mf.geometry import (
     GeometryParams,
     ModuleStyle,
@@ -266,7 +268,20 @@ class _SettingsApp(ttk.Frame):
         # raw values "threemf" or "svg"; _output_format() narrows to the
         # Literal type for mypy.
         self._output_var = tk.StringVar(value="threemf")
+        # Design persistence: current on-disk path (None = Untitled),
+        # dirty flag vs. that path, and the cross-session recents list. The
+        # ``_suspend_dirty`` flag silences the var-write traces while
+        # ``_apply_design`` replays a loaded design into the form fields,
+        # so loading doesn't spuriously mark the design dirty.
+        self._current_path: Path | None = None
+        self._dirty: bool = False
+        self._suspend_dirty: bool = False
+        self._recents: Recents = Recents.load()
+        self._recents_menu: tk.Menu | None = None
         self._build()
+        self._wire_design_io_menu()
+        self._wire_dirty_traces()
+        self._update_window_title()
 
     def _build(self) -> None:
         # --- Payload + EC ----------------------------------------------------
@@ -842,6 +857,7 @@ class _SettingsApp(ttk.Frame):
             return
         self._labels.append(label)
         self._labels_list.insert(tk.END, _label_display(label))
+        self._mark_dirty()
         self._redraw_layout()
 
     def _update_label(self) -> None:
@@ -856,6 +872,7 @@ class _SettingsApp(ttk.Frame):
         self._labels_list.delete(idx)
         self._labels_list.insert(idx, _label_display(label))
         self._labels_list.selection_set(idx)
+        self._mark_dirty()
         self._redraw_layout()
 
     def _remove_label(self) -> None:
@@ -865,6 +882,7 @@ class _SettingsApp(ttk.Frame):
             return
         del self._labels[idx]
         self._labels_list.delete(idx)
+        self._mark_dirty()
         self._redraw_layout()
 
     def _remove_all_labels(self) -> None:
@@ -879,6 +897,7 @@ class _SettingsApp(ttk.Frame):
             return
         self._labels.clear()
         self._labels_list.delete(0, tk.END)
+        self._mark_dirty()
         self._redraw_layout()
 
     # --- Layout canvas (interactive placement) -------------------------------
@@ -1270,6 +1289,7 @@ class _SettingsApp(ttk.Frame):
         self._labels_list.selection_set(i)
         self._label_x.set(x_mm)
         self._label_y.set(y_mm)
+        self._mark_dirty()
         self._redraw_layout()
 
     def _on_canvas_release(self, event: tk.Event[tk.Misc]) -> None:
@@ -1306,6 +1326,7 @@ class _SettingsApp(ttk.Frame):
                         self._labels_list.insert(tk.END, _label_display(new_label))
                         self._labels_list.selection_clear(0, tk.END)
                         self._labels_list.selection_set(tk.END)
+                        self._mark_dirty()
                         self._redraw_layout()
         self._drag_label_index = None
         self._drag_moved = False
@@ -1320,7 +1341,352 @@ class _SettingsApp(ttk.Frame):
             return
         del self._labels[idx]
         self._labels_list.delete(idx)
+        self._mark_dirty()
         self._redraw_layout()
+
+    # --- Design persistence (File menu) --------------------------------------
+
+    def _design_tracked_vars(self) -> tuple[tk.Variable, ...]:
+        """Return every ``tk.Variable`` that contributes to the saved Design.
+
+        Layout-canvas toggles (grid overlay, snap, spacing, grid size) are
+        *not* included: they're per-session UI preferences, not part of the
+        printable artifact.
+        """
+        return (
+            self._text_var,
+            self._ec_var,
+            self._plate_w,
+            self._plate_d,
+            self._plate_h,
+            self._qr_size,
+            self._qr_x,
+            self._qr_y,
+            self._pixel_h,
+            self._quiet,
+            self._style_var,
+            self._finish_var,
+            self._output_var,
+        )
+
+    def _wire_dirty_traces(self) -> None:
+        """Attach ``trace_add('write', \u2026)`` to every design-tracked var.
+
+        Label-list mutations aren't driven by a :class:`tk.Variable`, so
+        they call :meth:`_mark_dirty` directly from their handlers
+        (``_add_label``, ``_update_label``, \u2026, ``_on_canvas_drag``).
+        """
+        for var in self._design_tracked_vars():
+            var.trace_add("write", self._on_design_var_changed)
+
+    def _on_design_var_changed(self, *_args: object) -> None:
+        if self._suspend_dirty:
+            return
+        self._mark_dirty()
+
+    def _mark_dirty(self) -> None:
+        if self._suspend_dirty or self._dirty:
+            return
+        self._dirty = True
+        self._update_window_title()
+
+    def _mark_clean(self) -> None:
+        if not self._dirty:
+            # Title may still need refreshing if only the path changed.
+            self._update_window_title()
+            return
+        self._dirty = False
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        """Reflect current path and dirty-state in the root window title."""
+        name = self._current_path.name if self._current_path else "Untitled"
+        star = "*" if self._dirty else ""
+        # ``\u2014`` is an em-dash; matches the existing title format set
+        # by :func:`run` (\u201cqr23mf \u2014 \u2026\u201d).
+        self.winfo_toplevel().title(f"qr23mf \u2014 {name}{star}")
+
+    def _current_design(self) -> Design:
+        """Capture the current form state as a :class:`Design`.
+
+        Best-effort: unparseable spinbox values fall back to module
+        defaults rather than aborting a save. Validation is deferred to
+        :meth:`_gather_design` (used by Preview / Create), which raises the
+        user-friendly ``messagebox.showerror`` dialog when something is
+        genuinely wrong. Save should always succeed so the user never loses
+        their work-in-progress state.
+        """
+        plate_defaults = GeometryParams()
+        qr_defaults = QrPlacement()
+
+        def _f(var: tk.DoubleVar, fallback: float) -> float:
+            try:
+                return float(var.get())
+            except (ValueError, tk.TclError):
+                return fallback
+
+        def _i(var: tk.IntVar, fallback: int) -> int:
+            try:
+                return int(var.get())
+            except (ValueError, tk.TclError):
+                return fallback
+
+        ec_first = self._ec_var.get().strip().upper()[:1]
+        ec: EcLevel = ec_first if ec_first in ("L", "M", "Q", "H") else "M"  # type: ignore[assignment]
+
+        style_raw = self._style_var.get()
+        style: ModuleStyle = "dot" if style_raw == "dot" else "square"
+        finish_raw = self._finish_var.get()
+        finish: QrFinish
+        if finish_raw == "extruded":
+            finish = "extruded"
+        elif finish_raw == "sunken":
+            finish = "sunken"
+        else:
+            finish = "flush"
+        output_raw = self._output_var.get()
+        output: _OutputFormat = "svg" if output_raw == "svg" else "threemf"
+
+        qr_size_raw = _f(self._qr_size, 0.0)
+        placement = QrPlacement(
+            qr_size_mm=qr_size_raw if qr_size_raw > 0 else None,
+            x_offset_mm=_f(self._qr_x, qr_defaults.x_offset_mm),
+            y_offset_mm=_f(self._qr_y, qr_defaults.y_offset_mm),
+        )
+        plate = GeometryParams(
+            size_mm=_f(self._plate_w, plate_defaults.size_mm),
+            base_height_mm=_f(self._plate_h, plate_defaults.base_height_mm),
+            pixel_height_mm=_f(self._pixel_h, plate_defaults.pixel_height_mm),
+            quiet_zone_modules=_i(self._quiet, plate_defaults.quiet_zone_modules),
+            depth_mm=_f(self._plate_d, plate_defaults.size_mm),
+        )
+        return Design(
+            payload=self._text_var.get(),
+            ec=ec,
+            plate=plate,
+            qr=placement,
+            module_style=style,
+            finish=finish,
+            output=output,
+            text_labels=tuple(self._labels),
+        )
+
+    def _apply_design(self, design: Design) -> None:
+        """Replace every form field with ``design``'s values.
+
+        Dirty tracking is suspended for the duration so the programmatic
+        var assignments don't each flip the dirty flag. The caller is
+        responsible for calling :meth:`_mark_clean` after a successful
+        load or a fresh :meth:`_on_file_new` so the title and flag settle
+        correctly.
+        """
+        self._suspend_dirty = True
+        try:
+            self._text_var.set(design.payload)
+            # Mirror the combobox display convention: 'M' shown as
+            # 'M (default)'; the rest passes through unchanged so the
+            # Combobox's readonly value-list round-trips.
+            self._ec_var.set("M (default)" if design.ec == "M" else design.ec)
+            self._plate_w.set(float(design.plate.size_mm))
+            self._plate_d.set(float(design.plate.effective_depth_mm))
+            self._plate_h.set(float(design.plate.base_height_mm))
+            self._pixel_h.set(float(design.plate.pixel_height_mm))
+            self._quiet.set(int(design.plate.quiet_zone_modules))
+            # ``qr_size_mm == None`` means "auto-fit" in the GUI, represented
+            # by 0 in the spinbox per the existing tooltip ("Size (mm, 0 = fill)").
+            self._qr_size.set(0.0 if design.qr.qr_size_mm is None else float(design.qr.qr_size_mm))
+            self._qr_x.set(float(design.qr.x_offset_mm))
+            self._qr_y.set(float(design.qr.y_offset_mm))
+            self._style_var.set(design.module_style)
+            self._finish_var.set(design.finish)
+            self._output_var.set(design.output)
+            # Replace the label list wholesale and repaint the listbox.
+            self._labels.clear()
+            self._labels.extend(design.text_labels)
+            self._labels_list.delete(0, tk.END)
+            for lab in self._labels:
+                self._labels_list.insert(tk.END, _label_display(lab))
+            # Reset the "new label" form to a reasonable starting point
+            # rather than leaving whatever the user typed against the
+            # previous design.
+            self._label_text.set("")
+            self._label_x.set(0.0)
+            self._label_y.set(-20.0)
+            self._label_h.set(5.0)
+            self._label_ext.set(1.0)
+            self._qr_selected = False
+        finally:
+            self._suspend_dirty = False
+        self._redraw_layout()
+
+    def _wire_design_io_menu(self) -> None:
+        """Build the menubar + File menu and bind keyboard shortcuts."""
+        top = self.winfo_toplevel()
+        menubar = tk.Menu(top)
+        file_menu = tk.Menu(menubar, tearoff=False)
+
+        # Platform-conditional accelerators. Tk renders ``Cmd+O`` as
+        # ``\u2318O`` in the menu on macOS; ``Ctrl+O`` stays literal on
+        # Windows / Linux. The actual bindings use the Tk virtual
+        # modifier names (``Command`` / ``Control``).
+        if sys.platform == "darwin":
+            mod, prefix = "Command", "Cmd+"
+        else:
+            mod, prefix = "Control", "Ctrl+"
+
+        file_menu.add_command(
+            label="New",
+            accelerator=f"{prefix}N",
+            command=self._on_file_new,
+        )
+        file_menu.add_command(
+            label="Open\u2026",
+            accelerator=f"{prefix}O",
+            command=self._on_file_open_dialog,
+        )
+        self._recents_menu = tk.Menu(file_menu, tearoff=False)
+        file_menu.add_cascade(label="Open Recent", menu=self._recents_menu)
+        file_menu.add_separator()
+        file_menu.add_command(
+            label="Save",
+            accelerator=f"{prefix}S",
+            command=self._on_file_save,
+        )
+        file_menu.add_command(
+            label="Save As\u2026",
+            accelerator=f"{prefix}Shift+S",
+            command=self._on_file_save_as,
+        )
+
+        menubar.add_cascade(label="File", menu=file_menu)
+        top.configure(menu=menubar)
+
+        # Keyboard shortcuts. On macOS ``<Command-o>`` also dispatches
+        # when the menu accelerator is displayed; the explicit bind
+        # ensures the shortcut works even when the menu isn't focused.
+        top.bind(f"<{mod}-n>", lambda _e: self._on_file_new())
+        top.bind(f"<{mod}-o>", lambda _e: self._on_file_open_dialog())
+        top.bind(f"<{mod}-s>", lambda _e: self._on_file_save())
+        top.bind(f"<{mod}-Shift-S>", lambda _e: self._on_file_save_as())
+
+        self._rebuild_recents_menu()
+
+    def _rebuild_recents_menu(self) -> None:
+        """Repopulate the Open Recent submenu from :attr:`_recents`.
+
+        Called on startup, after every successful open / save, and after
+        clearing the list. Shows \u201c(empty)\u201d and disables the entry when
+        there are no recents, so the user has feedback that the submenu
+        exists rather than wondering why nothing happens.
+        """
+        menu = self._recents_menu
+        if menu is None:
+            return
+        menu.delete(0, tk.END)
+        paths = list(self._recents.as_list())
+        if not paths:
+            menu.add_command(label="(empty)", state=tk.DISABLED)
+            return
+        for p in paths:
+            # ``functools.partial`` captures the current path by value
+            # rather than by closure reference — otherwise every menu entry
+            # would fire with whatever ``p`` ended up pointing at after the
+            # loop. ``partial`` also lets mypy narrow the callable type
+            # where a ``lambda path=p: \u2026`` defeats type inference.
+            menu.add_command(
+                label=p.name,
+                command=functools.partial(self._on_file_open_path, p),
+            )
+        menu.add_separator()
+        menu.add_command(label="Clear Recent", command=self._on_clear_recents)
+
+    def _remember_path(self, path: Path) -> None:
+        """Promote ``path`` in the recents list and persist it."""
+        self._recents.add(path)
+        # Recents is a convenience; a read-only config dir shouldn't block
+        # the actual open/save the user is performing.
+        with contextlib.suppress(OSError):
+            self._recents.save()
+        self._rebuild_recents_menu()
+
+    def _on_file_new(self) -> None:
+        self._apply_design(Design())
+        self._current_path = None
+        self._mark_clean()
+
+    def _on_file_open_dialog(self) -> None:
+        raw = filedialog.askopenfilename(
+            parent=self.winfo_toplevel(),
+            title="Open qr23mf design",
+            filetypes=[("qr23mf design", "*.json"), ("All files", "*.*")],
+        )
+        if not raw:
+            return
+        self._on_file_open_path(Path(raw))
+
+    def _on_file_open_path(self, path: Path) -> None:
+        try:
+            design = load_design(path)
+        except FileNotFoundError:
+            messagebox.showerror(
+                "Open failed",
+                f"File not found: {path}",
+            )
+            return
+        except OSError as exc:
+            messagebox.showerror("Open failed", f"Could not read {path}:\n{exc}")
+            return
+        except ValueError as exc:
+            messagebox.showerror("Open failed", f"Could not parse {path}:\n{exc}")
+            return
+        self._apply_design(design)
+        self._current_path = path.resolve()
+        self._remember_path(self._current_path)
+        self._mark_clean()
+        self._status_var.set(f"Opened {self._current_path.name}.")
+
+    def _on_file_save(self) -> None:
+        if self._current_path is None:
+            self._on_file_save_as()
+            return
+        try:
+            written = save_design(self._current_design(), self._current_path)
+        except OSError as exc:
+            messagebox.showerror(
+                "Save failed",
+                f"Could not write {self._current_path}:\n{exc}",
+            )
+            return
+        self._current_path = written
+        self._remember_path(written)
+        self._mark_clean()
+        self._status_var.set(f"Saved {written.name}.")
+
+    def _on_file_save_as(self) -> None:
+        raw = filedialog.asksaveasfilename(
+            parent=self.winfo_toplevel(),
+            title="Save qr23mf design",
+            defaultextension=".json",
+            filetypes=[("qr23mf design", "*.json"), ("All files", "*.*")],
+        )
+        if not raw:
+            return
+        try:
+            written = save_design(self._current_design(), Path(raw))
+        except OSError as exc:
+            messagebox.showerror("Save failed", f"Could not write {raw}:\n{exc}")
+            return
+        self._current_path = written
+        self._remember_path(written)
+        self._mark_clean()
+        self._status_var.set(f"Saved {written.name}.")
+
+    def _on_clear_recents(self) -> None:
+        self._recents.clear()
+        with contextlib.suppress(OSError):
+            self._recents.save()
+        self._rebuild_recents_menu()
+        self._status_var.set("Cleared recent designs.")
 
     # --- Update check --------------------------------------------------------
 
