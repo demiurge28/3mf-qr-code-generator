@@ -45,7 +45,7 @@ Flags: `-NonInteractive`, `-SkipTk`, `-Tool uv|pipx`. If you see a *"running scr
 
 ### After installing
 
-- `qr23mf gui` — launch the visual designer.
+- `qr23mf gui` — launch the visual designer; its **File** menu saves / loads designs as `.json` files with every setting preserved.
 - `qr23mf generate --text "https://example.com" --out coaster.3mf` — run the same pipeline from the CLI.
 - `qr23mf svg --text "https://example.com" --out coaster.svg` — export a 2D SVG for laser etching / engraving.
 - `qr23mf --version` — print the installed version.
@@ -131,6 +131,38 @@ Press **Preview** to open a 2D top-down preview with a one-line summary (plate d
 * **Create…** — opens a native save dialog. What gets written depends on the **Output** toggle back on the settings window:
   * **3D print (3MF)** (default) — writes a **two-object 3MF** file. Inside the `.3mf`, the base is `objectid=1` and the QR + text features are `objectid=2`, so slicers like Bambu Studio, OrcaSlicer, and PrusaSlicer load them as two independently selectable bodies — assign a different filament to each for a two-color print. The `.3mf` suffix is appended automatically.
   * **Laser etch (SVG)** — writes a 2D SVG with millimetre-accurate `width` / `height` / `viewBox`, ready to drop into LightBurn, xTool Creative Space, LaserGRBL, or any vector editor for laser etching / engraving a flat plate. The `.svg` suffix is appended automatically.
+
+### Saved designs (File menu)
+
+The settings window ships with a **File** menu so you can name, round-trip, and revisit designs across sessions instead of re-entering every spinbox:
+
+| Entry | Shortcut | Behaviour |
+|---|---|---|
+| **New** | ⌘N / Ctrl+N | Reset every field to module defaults. |
+| **Open…** | ⌘O / Ctrl+O | Load a `.json` design file and repopulate every field. |
+| **Open Recent ▶** | — | Submenu of the 8 most-recently-used designs. Entries for missing files are auto-pruned. A trailing **Clear Recent** wipes the list. |
+| **Save** | ⌘S / Ctrl+S | Write to the current file, or prompt via Save As if none yet. |
+| **Save As…** | ⌘⇧S / Ctrl+Shift+S | Name and write a fresh `.json`. The `.json` suffix is appended if missing; parent directories are created. |
+
+Keyboard shortcuts work from anywhere in the window, not just when the menu has focus. The window title mirrors `(file, dirty)`:
+
+| Title | Meaning |
+|---|---|
+| `qr23mf — Untitled` | No file open, no unsaved changes. |
+| `qr23mf — Untitled*` | No file open, edits pending. |
+| `qr23mf — coaster.json` | `coaster.json` is open and in sync. |
+| `qr23mf — coaster.json*` | `coaster.json` is open with unsaved edits. |
+
+The saved JSON is pretty-printed, UTF-8, and versioned (`version: 1`). Every setting round-trips: payload, EC level, plate dimensions (width / depth / thickness), QR size + X/Y offset, module style, finish, output format, and every text label. The schema is forward-tolerant — unknown top-level keys emit a warning rather than raising, and missing keys fall back to module defaults — so today's file stays readable by tomorrow's qr23mf.
+
+The recents list lives in a per-user config directory that it manages on its own:
+
+- `$XDG_CONFIG_HOME/qr23mf/recents.json` on Linux/macOS (fallback `~/.config/qr23mf/recents.json`).
+- `%APPDATA%\qr23mf\recents.json` on Windows.
+
+It's self-healing — missing paths are pruned on load, and a read-only config directory never blocks the actual open/save you asked for.
+
+Layout-canvas preferences (Grid / Snap / Show spacing / grid spacing) are intentionally **not** saved to the design file — they're per-session UI, not part of the printable artifact.
 
 ### If `qr23mf gui` reports `Tkinter is not available`
 
