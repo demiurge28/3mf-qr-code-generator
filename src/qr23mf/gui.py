@@ -2111,23 +2111,31 @@ def _spawn_update_terminal(tag: str) -> bool:
         # Linux / other Unix: try common terminal emulators in order of
         # prevalence. ``x-terminal-emulator`` is the Debian-style alternatives
         # wrapper that points at whatever the user picked as default.
-        for term in (
-            "x-terminal-emulator",
-            "gnome-terminal",
-            "konsole",
-            "xfce4-terminal",
-            "mate-terminal",
-            "alacritty",
-            "kitty",
-            "xterm",
-        ):
+        #
+        # Each entry lists the argv to slot ``script_path`` into as the last
+        # element. Every listed flag takes either an argv-list (xterm,
+        # konsole, alacritty — the most restrictive) or a shell-parsed single
+        # string (xfce4-terminal, mate-terminal); a single path argument
+        # works in both, whereas a ``"bash <path>"`` compound string only
+        # works in the latter. Recent ``kitty`` drops ``-e`` entirely and
+        # takes the command positionally. The script itself is already +x
+        # and has a ``#!/usr/bin/env bash`` shebang, so ``bash`` does not
+        # need to be spelled out explicitly.
+        linux_emulators: tuple[tuple[str, tuple[str, ...]], ...] = (
+            ("x-terminal-emulator", ("-e",)),
+            ("gnome-terminal", ("--",)),
+            ("konsole", ("-e",)),
+            ("xfce4-terminal", ("-e",)),
+            ("mate-terminal", ("-e",)),
+            ("alacritty", ("-e",)),
+            ("kitty", ()),
+            ("xterm", ("-e",)),
+        )
+        for term, prefix_args in linux_emulators:
             if shutil.which(term) is None:
                 continue
             try:
-                if term == "gnome-terminal":
-                    subprocess.Popen([term, "--", "bash", script_path])
-                else:
-                    subprocess.Popen([term, "-e", f"bash {script_path}"])
+                subprocess.Popen([term, *prefix_args, script_path])
                 return True
             except OSError:
                 continue
@@ -2152,16 +2160,24 @@ def _write_update_script(tag: str) -> str | None:
 
     try:
         if sys.platform.startswith("win"):
+            # ``setlocal enabledelayedexpansion`` + ``!ERRORLEVEL!`` is
+            # required because cmd.exe expands ``%ERRORLEVEL%`` at
+            # block-parse time, not at statement-execution time. Without
+            # delayed expansion, the nested ``if !ERRORLEVEL!==0`` inside
+            # the outer ``else (...)`` would read the errorlevel from
+            # ``where uv`` instead of ``where pipx`` and silently always
+            # fall through to the error message.
             body = (
                 "@echo off\r\n"
+                "setlocal enabledelayedexpansion\r\n"
                 f"echo Updating qr23mf to {safe_tag}...\r\n"
                 "echo.\r\n"
                 "where uv >nul 2>nul\r\n"
-                "if %ERRORLEVEL%==0 (\r\n"
+                "if !ERRORLEVEL!==0 (\r\n"
                 f'  uv tool install --force "{git_spec}"\r\n'
                 ") else (\r\n"
                 "  where pipx >nul 2>nul\r\n"
-                "  if %ERRORLEVEL%==0 (\r\n"
+                "  if !ERRORLEVEL!==0 (\r\n"
                 f'    pipx install --force "{git_spec}"\r\n'
                 "  ) else (\r\n"
                 "    echo ERROR: neither uv nor pipx is on PATH.\r\n"
