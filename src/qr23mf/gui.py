@@ -98,9 +98,134 @@ def run() -> None:
     """Launch the Tkinter GUI and block until the main window closes."""
     root = tk.Tk()
     root.title("qr23mf \u2014 QR Code Plate Designer")
+    _set_app_icon(root)
     app = _SettingsApp(root)
     app.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
     root.mainloop()
+
+
+def _icon_path() -> Path | None:
+    """Return the absolute path to the bundled app icon, or ``None``.
+
+    The icon is packaged under :mod:`qr23mf.assets` so it travels with the
+    wheel / sdist and resolves the same whether the user installed via
+    ``uv tool install`` / ``pipx install`` or is running from a source
+    checkout. ``importlib.resources.as_file`` gives us a real filesystem
+    path even when the package is loaded from a zip import (needed
+    because NSImage / tk.PhotoImage both want a plain path).
+    """
+    try:
+        # Imported lazily so a missing/renamed asset never blocks GUI launch.
+        from importlib.resources import as_file, files
+
+        resource = files("qr23mf.assets").joinpath("icon.png")
+        with as_file(resource) as p:
+            return Path(p) if p.exists() else None
+    except (ModuleNotFoundError, FileNotFoundError, OSError):
+        return None
+
+
+def _set_app_icon(root: tk.Tk) -> None:
+    """Swap the default Python / Tk icon for the bundled QR code icon.
+
+    Two separate mechanisms are needed because Tk's ``iconphoto`` only
+    paints the window's own icon (title bar on macOS, title bar + taskbar
+    on Windows / Linux) — the macOS Dock icon is owned by
+    ``NSApplication`` and is NOT routed through Tk. On macOS we therefore
+    also call ``-[NSApplication setApplicationIconImage:]`` via the
+    Objective-C runtime so the Dock icon switches from the Python rocket
+    to the QR code without adding PyObjC as a dependency.
+
+    All failures are swallowed silently; a wrong-looking icon is a
+    cosmetic issue and must never prevent the user from launching the GUI.
+    """
+    icon = _icon_path()
+    if icon is None:
+        return
+
+    # Cross-platform: title-bar + taskbar icon. Keep a reference on root
+    # so the PhotoImage isn't garbage-collected out from under Tk.
+    try:
+        photo = tk.PhotoImage(file=str(icon))
+        root.iconphoto(True, photo)
+        root._qr23mf_icon = photo  # type: ignore[attr-defined]
+    except tk.TclError:
+        pass
+
+    if sys.platform == "darwin":
+        _set_macos_dock_icon(icon)
+
+
+def _set_macos_dock_icon(icon_path: Path) -> None:
+    """Set the macOS Dock icon via the Objective-C runtime (best effort).
+
+    Equivalent to::
+
+        [[NSApplication sharedApplication]
+            setApplicationIconImage:
+                [[NSImage alloc] initWithContentsOfFile:@"<path>"]];
+
+    We invoke it through ``libobjc``/``ctypes`` rather than depending on
+    ``pyobjc-framework-Cocoa`` — the icon is a cosmetic nicety and not
+    worth a multi-megabyte runtime dep. Any error (missing library,
+    unexpected ABI, nil NSImage) is swallowed silently and the default
+    Python rocket is left in place.
+    """
+    try:
+        import ctypes
+        import ctypes.util
+
+        libobjc_name = ctypes.util.find_library("objc")
+        if libobjc_name is None:
+            return
+        objc = ctypes.cdll.LoadLibrary(libobjc_name)
+
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+
+        def cls(name: str) -> int:
+            return int(objc.objc_getClass(name.encode("utf-8")) or 0)
+
+        def sel(name: str) -> int:
+            return int(objc.sel_registerName(name.encode("utf-8")) or 0)
+
+        ns_application = cls("NSApplication")
+        ns_image = cls("NSImage")
+        ns_string = cls("NSString")
+        if not (ns_application and ns_image and ns_string):
+            return
+
+        # [NSApplication sharedApplication]
+        objc.objc_msgSend.restype = ctypes.c_void_p
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        shared_app = objc.objc_msgSend(ns_application, sel("sharedApplication"))
+        if not shared_app:
+            return
+
+        # NSString *path = [NSString stringWithUTF8String:"<path>"]
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p]
+        ns_path = objc.objc_msgSend(
+            ns_string, sel("stringWithUTF8String:"), str(icon_path).encode("utf-8")
+        )
+        if not ns_path:
+            return
+
+        # NSImage *img = [[NSImage alloc] initWithContentsOfFile:path]
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        alloced = objc.objc_msgSend(ns_image, sel("alloc"))
+        if not alloced:
+            return
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        image = objc.objc_msgSend(alloced, sel("initWithContentsOfFile:"), ns_path)
+        if not image:
+            return
+
+        # [NSApp setApplicationIconImage:img]
+        objc.objc_msgSend(shared_app, sel("setApplicationIconImage:"), image)
+    except (OSError, ValueError, AttributeError):
+        return
 
 
 # ---------------------------------------------------------------------------
