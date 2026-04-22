@@ -52,13 +52,46 @@ Flags: `-NonInteractive`, `-SkipTk`, `-Tool uv|pipx`. If you see a *"running scr
 
 If `qr23mf` isn't on your `PATH` after install, run `uv tool update-shell` (uv) or `pipx ensurepath` (pipx) once and re-open your terminal. See [INSTALL.md](./INSTALL.md) for troubleshooting details.
 
+## Usage at a glance
+
+`qr23mf` has one configuration pipeline (payload, EC level, plate, QR placement, module style, finish, text labels) and two output formats, reachable from either a GUI or the CLI:
+
+| Goal | Workflow | Output |
+|---|---|---|
+| 3D-print a two-color QR plate | `qr23mf gui` → design → **Preview** → **Create…** with **Output: 3D print (3MF)** | `*.3mf` (two objects: base + features) |
+| Laser-etch / engrave a flat plate | `qr23mf gui` → design → **Preview** → **Create…** with **Output: Laser etch (SVG)** | `*.svg` (mm-accurate viewBox) |
+| Script a 3MF from the shell | `qr23mf generate --text "…" --out coaster.3mf` | `*.3mf` |
+| Script an SVG from the shell | `qr23mf svg --text "…" --out coaster.svg` | `*.svg` |
+
+A typical session:
+
+```bash
+# 1. One-time install
+./install.sh                                      # macOS / Linux
+.\install.ps1                                     # Windows (PowerShell)
+
+# 2. Either launch the visual designer…
+qr23mf gui
+
+# 3. …or drive everything from the CLI
+qr23mf generate --text "https://example.com" --out coaster.3mf
+qr23mf svg      --text "https://example.com" --out coaster.svg --module-style dot --layer-per-feature
+
+# 4. Check what you have
+qr23mf --version
+qr23mf generate --help
+qr23mf svg --help
+```
+
+Every setting the GUI exposes (plate width / depth / thickness, QR size + X / Y offset, module style, quiet-zone, error-correction level, text labels) has a matching CLI flag on `generate` / `svg`, with the same defaults; pick whichever surface fits the task.
+
 ## GUI (Tkinter)
 
 ```bash
 qr23mf gui
 ```
 
-Opens a Tkinter configurator with a **Settings** window (the main designer) and a **Preview** window (opened from **Preview**).
+Opens a Tkinter configurator with a **Settings** window (the main designer) and a **Preview** window (opened from **Preview**). The app icon is a QR code that encodes this repository's URL — scan the Dock / taskbar icon to land back at the project page.
 
 ### Settings window
 
@@ -67,7 +100,7 @@ Opens a Tkinter configurator with a **Settings** window (the main designer) and 
 * **QR code** size and X / Y offset on the plate (`0 mm size` = auto-fit); module extrusion; quiet-zone margin.
 * **Module style**: **Squares** (axis-aligned boxes) or **Dots** (cylindrical prisms).
 * **Finish**: **Extruded** (raised above the plate), **Flush** (default — pixels embedded in the plate top slab), or **Sunken** (pixels occupy the top slab *and* the base has matching pockets carved into its top face, so the QR is visibly recessed even in single-color prints). Text labels mirror this selection.
-* **Output**: **3D print (3MF)** (default — two-object 3MF for slicers) or **Laser etch (SVG)** (2D SVG with mm-accurate viewBox for LightBurn / xTool / any vector editor). The **Create\u2026** button in the preview window writes whichever format is selected.
+* **Output**: **3D print (3MF)** (default — two-object 3MF for slicers) or **Laser etch (SVG)** (2D SVG with mm-accurate viewBox for LightBurn / xTool / any vector editor). The **Create…** button in the preview window writes whichever format is selected.
 * **Text labels** — add, update, remove, or **Remove all**; each label has its own text, X / Y position, height, and extrusion.
 * **Check for updates** button — queries the public GitHub Releases API (5 s timeout) and shows "No New Updates" when current, or offers to open the Releases page in your browser when a newer tag is available.
 
@@ -127,7 +160,7 @@ The GUI is pure Tkinter and runs on macOS, Linux, and Windows, but a few Python 
 
 ## CLI (power users)
 
-The same pipeline as the GUI, runnable from the shell. Subcommand: `generate`; plus top-level `--help` / `--version` flags.
+The same pipeline as the GUI, runnable from the shell. Subcommands: `generate` (writes a two-object 3MF) and `svg` (writes a 2D SVG for laser etching — see [SVG export](#svg-export-laser-etching) below); plus top-level `--help` / `--version` flags.
 
 ```bash
 # Print the mesh summary for a payload with sensible defaults
